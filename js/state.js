@@ -231,13 +231,17 @@
     'VERIFYING',
     'COMPLETED',
     'ESCALATED',
+    'RESULT_UNCERTAIN',
   ]);
 
   /**
    * 전이 테이블: state -> { event: nextState }
    * - PENDING 결과는 전이 없이 VERIFYING에 머물며 결과 조회만 허용한다.
-   * - FAILED / UNKNOWN 결과는 ESCALATED로 보낸다. (자동 재이체 금지)
    * - COMPLETED는 VERIFYING에서 RESULT_SUCCESS로만 도달 가능하다.
+   * - ESCALATED: 앱 안에서 해결할 수 없어 상담·재확인으로 넘긴 상태. 출금이 확정되지 않은
+   *   거래가 없으므로 NEW_CASE로 IDLE에 돌아갈 수 있다. (차단 사유, 경로 없음, 실패 확정)
+   * - RESULT_UNCERTAIN: 출금 여부를 알 수 없는 거래가 있는 상태. 중복 출금을 막기 위해
+   *   재진단·새 건(IDLE)으로 가는 간선이 없고, 결과 조회(RESULT_QUERY)로만 빠져나간다.
    */
   const FSM_TRANSITIONS = Object.freeze({
     IDLE: { TRANSFER_FAILED: 'DIAGNOSING', MANUAL_DIAGNOSE: 'DIAGNOSING' },
@@ -249,11 +253,12 @@
     VERIFYING: {
       RESULT_SUCCESS: 'COMPLETED',
       RESULT_FAILED: 'ESCALATED',
-      RESULT_UNKNOWN: 'ESCALATED',
+      RESULT_UNKNOWN: 'RESULT_UNCERTAIN',
       ESCALATE: 'ESCALATED',
     },
     COMPLETED: { NEW_CASE: 'IDLE' },
-    ESCALATED: { RECHECK: 'RECHECKING', RESULT_QUERY: 'VERIFYING', NEW_CASE: 'IDLE' },
+    ESCALATED: { RECHECK: 'RECHECKING', NEW_CASE: 'IDLE' },
+    RESULT_UNCERTAIN: { RESULT_QUERY: 'VERIFYING' },
   });
 
   function createFSM(options) {

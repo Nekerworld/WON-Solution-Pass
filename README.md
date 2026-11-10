@@ -25,6 +25,14 @@
 - 화면 너비가 520px 이하면 폰 프레임 없이 전체 화면 앱으로 표시됩니다(실제 모바일 기기용).
 - 상태는 `sessionStorage`에 저장되므로 새로고침해도 유지됩니다. 처음 상태로 돌아가려면 패널의 **데모 초기화**를 누르세요.
 
+### GitHub Pages 배포
+
+`master`에 push하면 `.github/workflows/deploy-pages.yml`이 `index.html`, `css/`, `js/`만 모아 GitHub Pages에 배포합니다. 제안서 PDF와 README는 게시되지 않습니다.
+
+- 최초 1회: 저장소 **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 설정합니다.
+- 수동 배포: **Actions → Deploy prototype to GitHub Pages → Run workflow**
+- 배포 주소: `https://nekerworld.github.io/WON-Solution-Pass/`
+
 ---
 
 ## 기본 시연 순서 (Case A · 정상 복구)
@@ -93,9 +101,12 @@ js/
 - 상태가 바뀔 때마다 `stateVersion`이 1씩 증가하고, 구독 중인 화면과 패널이 갱신됩니다.
 
 **상태머신(FSM)**
-- 상태: `IDLE`, `DIAGNOSING`, `PLAN_READY`, `WAITING_USER`, `RECHECKING`, `READY_TO_RETRY`, `VERIFYING`, `COMPLETED`, `ESCALATED`
+- 상태: `IDLE`, `DIAGNOSING`, `PLAN_READY`, `WAITING_USER`, `RECHECKING`, `READY_TO_RETRY`, `VERIFYING`, `COMPLETED`, `ESCALATED`, `RESULT_UNCERTAIN`
 - 상태 전이는 데이터 테이블로 정의되어 있으며, 테이블에 없는 전이는 거부됩니다.
 - `PENDING` 결과일 때는 `VERIFYING`에 머무릅니다.
+- `ESCALATED`: 앱 안에서 해결할 수 없어 상담·재확인으로 넘긴 상태입니다(차단 사유, 경로 없음, 이체 실패 확정). 출금이 불확실한 거래가 없으므로 다시 진단하거나 새 건으로 돌아갈 수 있습니다.
+- `RESULT_UNCERTAIN`: 이체 결과가 `UNKNOWN`이라 출금 여부를 알 수 없는 상태입니다. 중복 출금을 막기 위해 재진단·새 건으로 가는 전이가 없고, 결과 조회(`RESULT_QUERY`)로만 빠져나갑니다.
+- 결과 화면에서 **홈으로**(또는 뒤로)를 누르면 사건을 종료합니다: `COMPLETED`·`ESCALATED`는 `NEW_CASE`로 `IDLE`에 돌아가고, `VERIFYING`·`RESULT_UNCERTAIN`은 그대로 유지됩니다.
 
 **Rule Engine**
 - 차단 규칙: R06 은행 이용 불가, R05 계좌 제한, R07 잔액 부족

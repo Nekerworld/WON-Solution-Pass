@@ -400,10 +400,24 @@
   flex: none;
 }
 
+.resume-banner__icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.resume-banner > svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  opacity: 0.7;
+}
+
 .resume-banner__text {
   flex: 1;
+  min-width: 0;
   font-size: 13px;
   line-height: 1.45;
+  word-break: keep-all;
 }
 
 .resume-banner__text strong {

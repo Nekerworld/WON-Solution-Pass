@@ -214,12 +214,15 @@
     DIAGNOSING: { x: 215, y: 28 },
     PLAN_READY: { x: 375, y: 28 },
     WAITING_USER: { x: 530, y: 28 },
-    READY_TO_RETRY: { x: 215, y: 122 },
-    RECHECKING: { x: 450, y: 122 },
-    COMPLETED: { x: 70, y: 216 },
-    VERIFYING: { x: 215, y: 216 },
-    ESCALATED: { x: 450, y: 216 },
+    READY_TO_RETRY: { x: 215, y: 108 },
+    RECHECKING: { x: 450, y: 108 },
+    COMPLETED: { x: 70, y: 188 },
+    VERIFYING: { x: 215, y: 188 },
+    ESCALATED: { x: 450, y: 188 },
+    RESULT_UNCERTAIN: { x: 215, y: 268 },
   };
+  /** 다른 노드를 가로지르는 간선만 더 크게 휘게 한다 */
+  const FSM_BEND = { 'ESCALATED>IDLE': 60 };
 
   /** 전이 테이블을 그대로 그래프로 그린다. 현재 상태와 마지막 전이를 강조한다. */
   function renderFsmGraph(cur, history) {
@@ -243,16 +246,17 @@
     let edgesSvg = '';
     let hlSvg = '';
     pairs.forEach((p) => {
-      const c = curve(FSM_POS[p.from], FSM_POS[p.to], W, H, 14);
+      const k = p.from + '>' + p.to;
+      const c = curve(FSM_POS[p.from], FSM_POS[p.to], W, H, FSM_BEND[k] != null ? FSM_BEND[k] : 14);
       const isLast = last && last.from === p.from && last.to === p.to;
       const isEsc = p.events.length === 1 && p.events[0] === 'ESCALATE';
       const title = '<title>' + p.from + ' → ' + p.to + ' : ' + p.events.join(', ') + '</title>';
+      const label = (cls, text) => '<text x="' + c.lx.toFixed(1) + '" y="' + (c.ly - 4).toFixed(1) + '" class="g-elabel' + cls + '">' + esc(text) + '</text>';
       if (isLast) {
-        hlSvg +=
-          '<path d="' + c.d + '" class="g-edge is-hl" marker-end="url(#dp-arr-hl)">' + title + '</path>' +
-          '<text x="' + c.lx.toFixed(1) + '" y="' + (c.ly - 4).toFixed(1) + '" class="g-elabel is-hl">' + esc(last.event) + '</text>';
+        hlSvg += '<path d="' + c.d + '" class="g-edge is-hl" marker-end="url(#dp-arr-hl)">' + title + '</path>' + label(' is-hl', last.event);
       } else {
         edgesSvg += '<path d="' + c.d + '" class="g-edge' + (isEsc ? ' is-dashed' : '') + '" marker-end="url(#dp-arr)">' + title + '</path>';
+        if (p.events.indexOf('NEW_CASE') !== -1) edgesSvg += label('', 'NEW_CASE');
       }
     });
     const nodesSvg = WSP.FSM_STATES.map((st) => {
@@ -263,7 +267,7 @@
         '<text x="' + p.x + '" y="' + (p.y + 3.5) + '">' + st + '</text></g>'
       );
     }).join('');
-    return '<svg viewBox="0 0 600 244" class="dp-svg" role="img" aria-label="상태머신 그래프">' + SVG_DEFS + edgesSvg + hlSvg + nodesSvg + '</svg>';
+    return '<svg viewBox="0 0 600 296" class="dp-svg" role="img" aria-label="상태머신 그래프">' + SVG_DEFS + edgesSvg + hlSvg + nodesSvg + '</svg>';
   }
 
   const FACT_SHORT = [

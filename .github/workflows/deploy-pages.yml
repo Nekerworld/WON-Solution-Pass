@@ -1,0 +1,62 @@
+name: Deploy prototype to GitHub Pages
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # 앱 실행에 필요한 정적 파일만 게시한다. (제안서 PDF·README 등은 제외)
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -r css js _site/
+
+      - name: Check local asset references
+        run: |
+          missing=0
+          for ref in $(grep -oE '(src|href)="[^"#?]+"' _site/index.html | sed -E 's/^(src|href)="//; s/"$//'); do
+            case "$ref" in
+              http://*|https://*|//*|data:*) continue ;;
+            esac
+            if [ ! -f "_site/$ref" ]; then
+              echo "::error file=index.html::Missing asset: $ref"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

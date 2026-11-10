@@ -192,7 +192,7 @@
         const first = await bank.submitTransfer(req);
         assert(first.ok && first.data.transaction.status === 'UNKNOWN', 'UNKNOWN 응답 아님');
         f.transition('RESULT_UNKNOWN');
-        assert(f.state === 'ESCALATED' && f.state !== 'COMPLETED', 'FSM: ' + f.state);
+        assert(f.state === 'RESULT_UNCERTAIN', 'FSM: ' + f.state);
         const again = await bank.submitTransfer(req);
         assert(again.ok && again.data.duplicate === true && txCount() === 1, '중복 거래 생성됨');
         assert(store.getState().account.balance === WSP.initialBankState.account.balance, 'UNKNOWN인데 잔액 차감됨');
@@ -212,6 +212,24 @@
         const f = testFsm();
         assert(!f.transition('USER_APPROVED').ok && f.state === 'IDLE', 'IDLE에서 승인 전이 허용됨');
         assert(!f.transition('RESULT_SUCCESS').ok, 'IDLE에서 완료 전이 허용됨');
+      });
+
+      await t('FSM: 결과 불명 거래는 새 건·재진단으로 갈 수 없고 결과 조회만 허용', async () => {
+        const f = testFsm();
+        ['MANUAL_DIAGNOSE', 'NO_ACTION_NEEDED', 'USER_APPROVED', 'RESULT_UNKNOWN'].forEach((ev) => f.transition(ev));
+        assert(f.state === 'RESULT_UNCERTAIN', 'FSM: ' + f.state);
+        assert(!f.can('NEW_CASE') && !f.can('RECHECK') && !f.can('USER_APPROVED'), '결과 불명 상태에서 출구 허용됨');
+        assert(f.transition('RESULT_QUERY').ok && f.state === 'VERIFYING', '결과 조회 전이 실패');
+      });
+
+      await t('FSM: 완료·상담 인계 건은 NEW_CASE로 IDLE 복귀', async () => {
+        const done = testFsm();
+        ['MANUAL_DIAGNOSE', 'NO_ACTION_NEEDED', 'USER_APPROVED', 'RESULT_SUCCESS', 'NEW_CASE'].forEach((ev) => done.transition(ev));
+        assert(done.state === 'IDLE', 'COMPLETED 이후: ' + done.state);
+        const failed = testFsm();
+        ['MANUAL_DIAGNOSE', 'NO_ACTION_NEEDED', 'USER_APPROVED', 'RESULT_FAILED'].forEach((ev) => failed.transition(ev));
+        assert(failed.state === 'ESCALATED', '실패 확정 후: ' + failed.state);
+        assert(failed.transition('NEW_CASE').ok && failed.state === 'IDLE', 'ESCALATED 이후 IDLE 복귀 실패');
       });
 
       await t('경로 탐색: 기본 시나리오는 정책 가중치 합이 최소인 경로(비용 6)', async () => {

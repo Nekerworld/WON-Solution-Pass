@@ -64,6 +64,8 @@
         session.plan = null;
       } else if (fsm.state === 'RECHECKING') {
         fsm.restore(session.plan ? 'PLAN_READY' : 'IDLE', fsm.history());
+      } else if (fsm.state === 'ESCALATED' && session.caseCtx && session.caseCtx.escalation && session.caseCtx.escalation.code === 'TRANSFER_UNKNOWN') {
+        fsm.restore('RESULT_UNCERTAIN', fsm.history());
       }
       events.add('APP', '세션 복원 (FSM ' + fsm.state + ')');
     } catch (e) {
@@ -279,17 +281,11 @@
   async function startDiagnosis(trigger, reasons) {
     if (diagnosing) return;
     const st = fsm.state;
-    if (st === 'VERIFYING') {
+    if (st === 'VERIFYING' || st === 'RESULT_UNCERTAIN') {
       openResult();
       return;
     }
     if (st === 'DIAGNOSING' || st === 'RECHECKING') return;
-    const escCode = session.caseCtx && session.caseCtx.escalation && session.caseCtx.escalation.code;
-    if (st === 'ESCALATED' && escCode === 'TRANSFER_UNKNOWN') {
-      // 결과 불명 거래가 있는 동안에는 재진단/재이체 경로를 열지 않고 결과 조회로 안내한다.
-      openResult();
-      return;
-    }
 
     diagnosing = true;
     try {
@@ -434,10 +430,10 @@
     const st = fsm.state;
     if (st === 'PLAN_READY' || st === 'READY_TO_RETRY') return UI.navigate('plan', {});
     if (st === 'WAITING_USER') return returnFromFlow();
-    if (st === 'VERIFYING') return openResult();
+    if (st === 'VERIFYING' || st === 'RESULT_UNCERTAIN') return openResult();
     if (st === 'ESCALATED') {
       const code = session.caseCtx && session.caseCtx.escalation && session.caseCtx.escalation.code;
-      if (code && code.indexOf('TRANSFER_') === 0) return openResult();
+      if (code === 'TRANSFER_FAILED') return openResult();
       return UI.navigate('support', {});
     }
     return startDiagnosis('MANUAL');
@@ -453,7 +449,7 @@
       return UI.navigate('transfer', { returned: true }, { backTo: true });
     }
     if (st === 'IDLE' || st === 'COMPLETED') return UI.navigate('transfer', {});
-    if (st === 'VERIFYING') return openResult();
+    if (st === 'VERIFYING' || st === 'RESULT_UNCERTAIN') return openResult();
     if (st === 'WAITING_USER' || fsm.can('RECHECK')) {
       fsm.transition(st === 'WAITING_USER' ? 'USER_RETURNED' : 'RECHECK');
       const result = await computeFromBank();
@@ -739,13 +735,13 @@
     if (!id) return;
     UI.setLoading(btn, true);
     const rc = session.resultCtx;
-    let movedFromEscalated = false;
-    if (rc && rc.viaPass && rc.transactionId === id && fsm.state === 'ESCALATED') {
-      movedFromEscalated = fsm.transition('RESULT_QUERY', { transactionId: id }).ok;
+    let movedFromUncertain = false;
+    if (rc && rc.viaPass && rc.transactionId === id && fsm.state === 'RESULT_UNCERTAIN') {
+      movedFromUncertain = fsm.transition('RESULT_QUERY', { transactionId: id }).ok;
     }
     const r = await bank.getTransferResult(id);
     if (!r.ok) {
-      if (movedFromEscalated) fsm.transition('RESULT_UNKNOWN', { transactionId: id, reason: 'QUERY_FAILURE' });
+      if (movedFromUncertain) fsm.transition('RESULT_UNKNOWN', { transactionId: id, reason: 'QUERY_FAILURE' });
       if (btn && btn.isConnected) UI.setLoading(btn, false);
       UI.toast('결과를 조회하지 못했어요. 다시 이체하지 말고 잠시 후 조회해 주세요.', 'warning');
       return;
@@ -850,7 +846,21 @@
     }
   }
 
+  /**
+   * 결과 화면을 떠나면 사건을 종료한다(NEW_CASE → IDLE).
+   * 전이 테이블상 COMPLETED·ESCALATED에서만 가능하며, VERIFYING·RESULT_UNCERTAIN은 그대로 남는다.
+   */
+  function closeCaseOnLeaveResult() {
+    const cur = UI.current();
+    if (!cur || cur.id !== 'result' || !fsm.can('NEW_CASE')) return;
+    const from = fsm.state;
+    fsm.transition('NEW_CASE', { closedFrom: from });
+    events.add('APP', '결과 확인 후 사건 종료 (' + from + ' → IDLE)');
+    saveSession();
+  }
+
   function goHome() {
+    closeCaseOnLeaveResult();
     return UI.navigate('home', {}, { resetHistory: true, back: true });
   }
 
