@@ -1,0 +1,462 @@
+/* =========================================================
+   WON 해결패스 프로토타입 - 레이아웃 / 디자인 토큰
+   ========================================================= */
+
+:root {
+  --won-blue: #0067ac;
+  --won-blue-dark: #004f86;
+  --won-blue-deep: #0a2f5c;
+  --won-blue-light: #e8f2fb;
+  --won-sky: #3fa2e8;
+
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --line: #e6eaf0;
+  --line-strong: #d3dae3;
+
+  --text: #191f28;
+  --text-2: #4e5968;
+  --text-3: #8b95a1;
+
+  --success: #1e9e6a;
+  --success-bg: #e7f6ef;
+  --warning: #e08f00;
+  --warning-bg: #fff4dc;
+  --danger: #e5484d;
+  --danger-bg: #fdecec;
+  --neutral-bg: #eef1f5;
+
+  --radius-sm: 10px;
+  --radius: 16px;
+  --radius-lg: 22px;
+
+  --shadow-card: 0 1px 2px rgba(16, 32, 64, 0.04), 0 4px 16px rgba(16, 32, 64, 0.06);
+  --shadow-float: 0 12px 40px rgba(10, 30, 70, 0.18);
+
+  --font: "Pretendard", "Pretendard Variable", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+    "Malgun Gothic", "맑은 고딕", "Noto Sans KR", system-ui, sans-serif;
+  --mono: "SFMono-Regular", Consolas, "D2Coding", "Liberation Mono", monospace;
+
+  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--font);
+  color: var(--text);
+  background: radial-gradient(1200px 600px at 20% 0%, #dcebf8 0%, transparent 60%),
+    radial-gradient(900px 600px at 100% 100%, #e3e9f6 0%, transparent 55%), #eef2f7;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* ---------- Stage (PC) ---------- */
+
+/* PC: 왼쪽 50% 앱, 오른쪽 50% 시연 제어 패널 */
+.stage {
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.stage.is-panel-hidden {
+  grid-template-columns: 1fr;
+}
+
+.stage-main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  padding: 20px;
+}
+
+.stage-intro {
+  display: none;
+  width: 300px;
+  color: var(--won-blue-deep);
+}
+
+.stage-intro__eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  margin: 0 0 10px;
+  letter-spacing: -0.01em;
+}
+
+.stage-intro__title {
+  font-size: 34px;
+  margin: 0 0 10px;
+  letter-spacing: -0.03em;
+  color: var(--won-blue);
+}
+
+.stage-intro__desc {
+  margin: 0 0 22px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.stage-intro__list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 22px;
+  display: grid;
+  gap: 10px;
+}
+
+.stage-intro__list li {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+
+.stage-intro__list strong {
+  display: block;
+  color: var(--won-blue-deep);
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.stage-intro__notice {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-3);
+  margin: 0;
+}
+
+/* ---------- Phone frame ---------- */
+
+.phone {
+  position: relative;
+  flex: none;
+  height: clamp(680px, calc(100dvh - 40px), 844px);
+  aspect-ratio: 390 / 844;
+  border-radius: 54px;
+  background: #0d1117;
+  padding: 11px;
+  box-shadow: 0 0 0 2px #2a2f38, 0 30px 80px rgba(10, 30, 70, 0.28), inset 0 0 0 1px #3a404a;
+}
+
+.phone-island {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 112px;
+  height: 32px;
+  border-radius: 20px;
+  background: #000;
+  z-index: 50;
+}
+
+.phone-screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 44px;
+  overflow: hidden;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+.statusbar {
+  flex: none;
+  height: 48px;
+  padding: 0 28px 0 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  background: transparent;
+  position: relative;
+  z-index: 40;
+  transition: color 0.3s;
+}
+
+.statusbar__icons {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.statusbar svg {
+  fill: currentColor;
+}
+
+.phone-screen.is-dark-top .statusbar {
+  color: #fff;
+}
+
+.home-indicator {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 132px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.82);
+  z-index: 60;
+  pointer-events: none;
+}
+
+/* ---------- Viewport & screens ---------- */
+
+.viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  padding-top: 48px; /* statusbar */
+  will-change: transform, opacity;
+}
+
+.screen.is-white {
+  background: var(--surface);
+}
+
+.screen-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 4px 20px 28px;
+}
+
+.screen-body::-webkit-scrollbar {
+  display: none;
+}
+
+.screen-footer {
+  flex: none;
+  padding: 12px 20px 26px;
+  background: linear-gradient(to top, var(--bg) 70%, rgba(244, 246, 249, 0));
+}
+
+.screen.is-white .screen-footer {
+  background: linear-gradient(to top, #fff 70%, rgba(255, 255, 255, 0));
+}
+
+/* transitions */
+.screen.enter {
+  animation: screenIn 0.34s var(--ease) both;
+}
+.screen.leave {
+  animation: screenOut 0.34s var(--ease) both;
+}
+.screen.enter-back {
+  animation: screenInBack 0.34s var(--ease) both;
+}
+.screen.leave-back {
+  animation: screenOutBack 0.34s var(--ease) both;
+  z-index: 2;
+}
+.screen.enter-fade {
+  animation: fadeIn 0.25s ease both;
+}
+
+@keyframes screenIn {
+  from {
+    transform: translateX(36%);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes screenOut {
+  from {
+    transform: none;
+    opacity: 1;
+  }
+  to {
+    transform: translateX(-14%);
+    opacity: 0;
+  }
+}
+@keyframes screenInBack {
+  from {
+    transform: translateX(-14%);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes screenOutBack {
+  from {
+    transform: none;
+    opacity: 1;
+  }
+  to {
+    transform: translateX(36%);
+    opacity: 0;
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* overlay (sheet / modal / toast) */
+.overlay-root {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+
+.overlay-root > * {
+  pointer-events: auto;
+}
+
+/* ---------- Demo panel placement ---------- */
+
+.stage > .demo-panel {
+  min-width: 0;
+  height: 100vh;
+  height: 100dvh;
+  border-radius: 0;
+}
+
+.stage.is-panel-hidden > .demo-panel {
+  display: none;
+}
+
+/* ---------- Responsive ---------- */
+
+/* 왼쪽 절반에 소개 문구와 폰이 함께 들어갈 만큼 넓을 때만 소개 표시 */
+@media (min-width: 1560px) {
+  .stage-intro {
+    display: block;
+  }
+}
+
+@media (min-width: 1320px) {
+  .stage.is-panel-hidden .stage-intro {
+    display: block;
+  }
+}
+
+@media (max-width: 900px) {
+  .stage {
+    display: block;
+    height: auto;
+    min-height: 100dvh;
+  }
+  .stage-main {
+    min-height: 100dvh;
+  }
+  body .demo-panel {
+    display: none;
+  }
+  body .demo-panel.is-open {
+    display: flex;
+    position: fixed;
+    inset: 12px 12px auto auto;
+    width: min(420px, calc(100vw - 24px));
+    height: calc(100dvh - 24px);
+    border-radius: 20px;
+    z-index: 1000;
+  }
+}
+
+/* 실제 모바일 기기: 프레임 제거, 화면 전체 사용 */
+@media (max-width: 520px) {
+  body {
+    background: var(--bg);
+  }
+  .stage,
+  .stage-main {
+    padding: 0;
+    display: block;
+    min-height: 100dvh;
+  }
+  .phone {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    aspect-ratio: auto;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+    background: var(--bg);
+  }
+  .phone-island,
+  .home-indicator,
+  .statusbar {
+    display: none;
+  }
+  .phone-screen {
+    border-radius: 0;
+  }
+  .screen {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .screen-footer {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
