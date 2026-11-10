@@ -3,6 +3,10 @@ name: Deploy prototype to GitHub Pages
 on:
   push:
     branches: [master]
+    # 같은 저장소의 Flutter 앱 변경으로는 배포하지 않는다.
+    paths:
+      - "prototype/**"
+      - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -14,6 +18,9 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+env:
+  SRC: prototype
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,12 +28,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # 앱 실행에 필요한 정적 파일만 게시한다. (제안서 PDF·README 등은 제외)
+      # 프로토타입 실행에 필요한 정적 파일만 게시한다. (IDE 설정·제안서 PDF·README 등은 제외)
       - name: Assemble site
         run: |
           mkdir -p _site
-          cp index.html _site/
-          cp -r css js fonts _site/
+          cp "$SRC/index.html" _site/
+          cp -r "$SRC/css" "$SRC/js" "$SRC/fonts" _site/
           test -f _site/fonts/WooridaumR.ttf
 
       - name: Check local asset references
@@ -37,7 +44,7 @@ jobs:
               http://*|https://*|//*|data:*) continue ;;
             esac
             if [ ! -f "_site/$ref" ]; then
-              echo "::error file=index.html::Missing asset: $ref"
+              echo "::error file=$SRC/index.html::Missing asset: $ref"
               missing=1
             fi
           done
