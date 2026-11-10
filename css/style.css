@@ -2,21 +2,45 @@
    WON 해결패스 프로토타입 - 레이아웃 / 디자인 토큰
    ========================================================= */
 
-:root {
-  --won-blue: #0067ac;
-  --won-blue-dark: #004f86;
-  --won-blue-deep: #0a2f5c;
-  --won-blue-light: #e8f2fb;
-  --won-sky: #3fa2e8;
+/* 우리다움체: 우리금융그룹 무료 배포 서체. 라이선스상 배포 파일(TTF) 그대로 사용한다.
+   힌팅이 포함된 TTF 배포본이 Windows에서 OTF보다 작은 글자를 선명하게 렌더링한다. */
+@font-face {
+  font-family: "Wooridaum";
+  src: url("../fonts/WooridaumL.ttf") format("truetype");
+  font-weight: 300;
+  font-display: swap;
+}
 
-  --bg: #f4f6f9;
+@font-face {
+  font-family: "Wooridaum";
+  src: url("../fonts/WooridaumR.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Wooridaum";
+  src: url("../fonts/WooridaumB.ttf") format("truetype");
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  /* 앱 UI 기본색(우리WON뱅킹 화면 기준)과 CI 색상 */
+  --won-blue: #2488f3;
+  --won-blue-dark: #1a72d6;
+  --won-blue-deep: #0067ac;
+  --won-blue-light: #e6eeff;
+  --won-sky: #20c4f4;
+
+  --bg: #f2f3f5;
   --surface: #ffffff;
   --line: #e6eaf0;
   --line-strong: #d3dae3;
 
   --text: #191f28;
   --text-2: #4e5968;
-  --text-3: #8b95a1;
+  --text-3: #76808c;
 
   --success: #1e9e6a;
   --success-bg: #e7f6ef;
@@ -33,7 +57,7 @@
   --shadow-card: 0 1px 2px rgba(16, 32, 64, 0.04), 0 4px 16px rgba(16, 32, 64, 0.06);
   --shadow-float: 0 12px 40px rgba(10, 30, 70, 0.18);
 
-  --font: "Pretendard", "Pretendard Variable", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+  --font: "Wooridaum", "Pretendard", "Pretendard Variable", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
     "Malgun Gothic", "맑은 고딕", "Noto Sans KR", system-ui, sans-serif;
   --mono: "SFMono-Regular", Consolas, "D2Coding", "Liberation Mono", monospace;
 
@@ -255,7 +279,6 @@ button {
   flex-direction: column;
   background: var(--bg);
   padding-top: 48px; /* statusbar */
-  will-change: transform, opacity;
 }
 
 .screen.is-white {
@@ -278,7 +301,7 @@ button {
 .screen-footer {
   flex: none;
   padding: 12px 20px 26px;
-  background: linear-gradient(to top, var(--bg) 70%, rgba(244, 246, 249, 0));
+  background: linear-gradient(to top, var(--bg) 70%, rgba(242, 243, 245, 0));
 }
 
 .screen.is-white .screen-footer {

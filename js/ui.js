@@ -60,7 +60,68 @@
     phone: svg('<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>'),
     chevron: svg('<path d="M9 6l6 6-6 6"/>'),
     eye: svg('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
+    eyeOff: svg('<path d="M3 3l18 18"/><path d="M10.6 5.1A10.6 10.6 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3 3.9M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7c1.8 0 3.3-.5 4.6-1.2"/>'),
+    wallet: svg('<path d="M4 7h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M4 7l11-3v3"/><path d="M15 13.5h2"/>'),
+    copy: svg('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>'),
+    more: svg('<circle cx="12" cy="5" r="1.4" style="fill:currentColor;stroke:none"/><circle cx="12" cy="12" r="1.4" style="fill:currentColor;stroke:none"/><circle cx="12" cy="19" r="1.4" style="fill:currentColor;stroke:none"/>'),
+    gear: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>'),
+    pie: svg('<path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/>'),
+    stock: svg('<path d="M3 17l5-5 4 3 8-8"/><path d="M15 7h5v5"/>'),
+    plus: svg('<path d="M12 5v14M5 12h14"/>'),
+    homeFill:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.6L12 3.5l8.5 7.1V20a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z" fill="currentColor"/></svg>',
+    ai:
+      '<svg viewBox="0 0 28 28" aria-hidden="true"><circle cx="13" cy="15" r="10" fill="none" stroke="currentColor" stroke-width="1.9"/><text x="13" y="18.6" text-anchor="middle" font-size="10" font-weight="800" fill="currentColor" font-family="Arial, sans-serif">AI</text><path d="M23 1.5l.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9z" fill="#2488f3"/></svg>',
+    robot:
+      '<svg viewBox="0 0 40 40" aria-hidden="true"><rect x="9" y="13" width="22" height="17" rx="7" fill="#fff"/><circle cx="16" cy="21.5" r="2" fill="#2488f3"/><circle cx="24" cy="21.5" r="2" fill="#2488f3"/><path d="M20 13V9" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="20" cy="8" r="2" fill="#fff"/></svg>',
   };
+
+  /** 홈 상단 일러스트(자체 제작 장식) */
+  const HOME_ART =
+    '<svg class="home-hero__art" viewBox="0 0 360 120" aria-hidden="true">' +
+    '<rect x="34" y="14" width="78" height="70" rx="10" fill="#fff" stroke="#cfe3f7" stroke-width="2"/>' +
+    '<rect x="42" y="22" width="28" height="54" rx="4" fill="#d6ecff"/><rect x="76" y="22" width="28" height="54" rx="4" fill="#d6ecff"/>' +
+    '<circle cx="94" cy="36" r="6" fill="#fff4c7"/>' +
+    '<rect x="150" y="26" width="52" height="38" rx="6" fill="#fff" stroke="#cfe3f7" stroke-width="2"/>' +
+    '<path d="M156 58l12-14 9 9 7-6 12 11z" fill="#bfe3c9"/>' +
+    '<path d="M262 0v26" stroke="#b9c7d6" stroke-width="2"/><path d="M246 40a16 14 0 0 1 32 0z" fill="#ffd66b"/>' +
+    '<rect x="292" y="78" width="26" height="24" rx="5" fill="#f2c9a5"/>' +
+    '<ellipse cx="298" cy="66" rx="8" ry="15" fill="#86d1a6" transform="rotate(-18 298 66)"/>' +
+    '<ellipse cx="312" cy="64" rx="8" ry="16" fill="#6cc497" transform="rotate(16 312 64)"/>' +
+    '<ellipse cx="226" cy="98" rx="14" ry="4" fill="#ffd66b"/><ellipse cx="226" cy="93" rx="14" ry="4" fill="#ffe08a"/><ellipse cx="226" cy="88" rx="14" ry="4" fill="#ffe9a8"/>' +
+    '</svg>';
+
+  /** 가로 스크롤 카드에 점 표시를 연결한다 */
+  function bindCarousels(root) {
+    root.querySelectorAll('[data-carousel]').forEach((track) => {
+      const dots = track.parentElement.querySelector('[data-dots]');
+      if (!dots) return;
+      const items = Array.prototype.slice.call(track.children);
+      track.addEventListener(
+        'scroll',
+        () => {
+          let idx = 0;
+          let best = Infinity;
+          items.forEach((it, i) => {
+            const d = Math.abs(it.offsetLeft - items[0].offsetLeft - track.scrollLeft);
+            if (d < best) {
+              best = d;
+              idx = i;
+            }
+          });
+          Array.prototype.forEach.call(dots.children, (dot, i) => dot.classList.toggle('is-on', i === idx));
+        },
+        { passive: true }
+      );
+    });
+  }
+
+  function dotsHtml(n) {
+    if (n < 2) return '';
+    let h = '<div class="dots" data-dots>';
+    for (let i = 0; i < n; i++) h += '<i' + (i === 0 ? ' class="is-on"' : '') + '></i>';
+    return h + '</div>';
+  }
 
   /* ==================================================================
    * 공용 템플릿 조각
@@ -124,18 +185,17 @@
   SCREENS.home = {
     title: '홈',
     async render() {
-      const res = await Promise.all([bank.getCustomerState(), bank.getTransactions()]);
-      const cs = res[0];
-      const txs = res[1];
+      const cs = await bank.getCustomerState();
       const a = app();
+      const s = a.session;
       const st = a.fsm.state;
-      const name = cs.ok ? cs.data.customerName : '고객';
+      const hideBal = !!s.hideBalance;
 
-      const balanceHtml = cs.ok
-        ? Number(cs.data.balance).toLocaleString('ko-KR') + '<small>원</small>'
-        : '<span style="font-size:16px;font-weight:600;opacity:.9">잔액을 불러오지 못했어요</span>';
+      let balanceHtml;
+      if (!cs.ok) balanceHtml = '<span class="acct__err">잔액을 불러오지 못했어요</span>';
+      else if (hideBal) balanceHtml = '<span class="acct__hidden">잔액 숨김</span>';
+      else balanceHtml = Number(cs.data.balance).toLocaleString('ko-KR') + '<small>원</small>';
 
-      let resume = '';
       const resumeMap = {
         PLAN_READY: ['진행 중인 해결 계획이 있어요', '남은 절차를 이어서 진행해 주세요'],
         WAITING_USER: ['해결 절차를 진행하던 중이에요', '돌아가면 은행 상태를 다시 확인해요'],
@@ -144,124 +204,112 @@
         ESCALATED: ['상담 확인이 필요한 건이 있어요', '확인된 내용을 볼 수 있어요'],
         RESULT_UNCERTAIN: ['결과 확인이 필요한 이체가 있어요', '결과가 확정될 때까지 다시 보내지 마세요'],
       };
-      if (resumeMap[st]) {
-        resume =
-          '<button class="resume-banner" data-action="open-pass"><span class="resume-banner__icon">' +
-          I.spark +
-          '</span><span class="resume-banner__text"><strong>' +
-          resumeMap[st][0] +
-          '</strong>' +
-          resumeMap[st][1] +
-          '</span>' +
-          I.chevron +
-          '</button>';
+      const hasCase = !!resumeMap[st];
+
+      const notices = [];
+      if (hasCase) notices.push({ action: 'open-pass', isCase: true, title: resumeMap[st][0], desc: resumeMap[st][1] });
+      if (!s.hideNotice) {
+        notices.push({ action: 'go-chat', title: '이체가 막혔다면 AI챗봇에게', desc: '해결패스가 막힌 이유부터 확인해요' });
+        notices.push({ action: 'noop', title: '시연용 가상 데이터예요', desc: '실제 은행·계좌와 연결되어 있지 않아요' });
       }
-
-      const services = [
-        ['open-flow', 'limit-management', I.gauge, '이체한도'],
-        ['open-flow', 'otp-registration', I.key, '디지털OTP'],
-        ['open-flow', 'kyc-flow', I.idcard, '고객확인'],
-        ['account-detail', '', I.list, '거래내역'],
-        ['noop', '', I.product, '예적금'],
-        ['noop', '', I.coin, '대출'],
-        ['noop', '', I.globe, '환전'],
-        ['noop', '', I.card, '카드'],
-      ];
-
-      let txHtml;
-      if (!txs.ok) txHtml = '<div class="empty">거래내역을 불러오지 못했어요</div>';
-      else if (!txs.data.transactions.length) txHtml = '<div class="empty">최근 거래가 없어요</div>';
-      else {
-        txHtml =
-          '<div class="tx-list">' +
-          txs.data.transactions
-            .slice(0, 4)
-            .map((t) => {
-              const tone = { SUCCESS: 'success', FAILED: 'danger', PENDING: 'warning', UNKNOWN: 'neutral' }[t.status];
-              const label = { SUCCESS: '완료', FAILED: '실패', PENDING: '처리 중', UNKNOWN: '결과 확인 필요' }[t.status];
-              return (
-                '<div class="tx-item"><div><div class="fw-700">' +
-                esc(t.recipient) +
-                ' · ' +
-                esc(t.recipientBank) +
-                '</div><div class="tx-item__sub">' +
-                esc(t.id) +
-                ' ' +
-                badge(label, tone) +
-                '</div></div><div class="tx-item__amount">' +
-                (t.status === 'SUCCESS' ? '-' : '') +
-                fmt(t.amount) +
-                '</div></div>'
-              );
-            })
+      const noticeHtml = notices.length
+        ? '<div class="home-notice"><div class="home-notice__track" data-carousel>' +
+          notices
+            .map(
+              (n) =>
+                '<div class="home-notice__item' +
+                (n.isCase ? ' is-case' : '') +
+                '"><button class="home-notice__main" data-action="' +
+                n.action +
+                '"><span class="home-notice__icon">' +
+                (n.isCase ? I.spark : I.bell) +
+                '</span><span class="home-notice__text"><strong>' +
+                esc(n.title) +
+                '</strong><span>' +
+                esc(n.desc) +
+                '</span></span>' +
+                (n.isCase ? '<span class="home-notice__go">' + I.chevron + '</span>' : '') +
+                '</button>' +
+                (n.isCase ? '' : '<button class="home-notice__close" data-action="notice-close" aria-label="알림 닫기">' + I.x + '</button>') +
+                '</div>'
+            )
             .join('') +
-          '</div>';
-      }
+          '</div>' +
+          dotsHtml(notices.length) +
+          '</div>'
+        : '';
+
+      const iconBtn = (icon, label) => '<button class="icon-btn" data-action="noop" aria-label="' + label + '">' + icon + '</button>';
 
       return (
-        '<div class="home-top"><div class="brand"><span class="brand__mark">W</span><span class="brand__name">우리<em>WON</em>뱅킹</span></div>' +
-        '<div class="home-top__actions"><button class="icon-btn" data-action="noop" aria-label="알림">' +
-        I.bell +
-        '</button><button class="icon-btn" data-action="noop" aria-label="전체 메뉴">' +
-        I.menu +
-        '</button></div></div>' +
-        '<div class="screen-body">' +
-        '<div class="greeting"><div class="greeting__text">' +
-        esc(name) +
-        '님,<br>오늘도 좋은 하루 보내세요</div>' +
-        badge('가상 데이터', 'demo') +
-        '</div>' +
-        (cs.ok ? '' : notice('일시적으로 은행 시스템에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.', 'warning', I.alert) + '<div class="mt-12"></div>') +
-        '<div class="account-card"><div class="account-card__name">' +
-        esc(cs.ok ? cs.data.accountName : '우리 주거래 통장') +
-        '</div><div class="account-card__num">우리은행 ' +
-        esc(cs.ok ? cs.data.accountNumber : '1002-***-******') +
-        '</div><div class="account-card__balance">' +
-        balanceHtml +
-        '</div><div class="account-card__actions"><button class="btn-glass" data-action="account-detail">조회</button><button class="btn-glass is-solid" data-action="go-transfer">이체</button></div></div>' +
-        resume +
-        '<div class="section"><div class="pass-entry"><div class="pass-entry__eyebrow">' +
-        I.spark.replace('<svg', '<svg width="14" height="14"') +
-        'WON 해결패스</div><h3 class="pass-entry__title">업무가 막혔다면, 이유부터 확인해 드려요</h3><p class="pass-entry__desc">은행이 이미 알고 있는 상태를 자동으로 확인하고, 필요한 절차만 순서대로 안내해요.</p><div class="pass-entry__actions"><button class="btn btn--primary btn--sm" data-action="open-pass">상태 확인하기</button><button class="btn btn--white btn--sm" data-action="go-chat">질문하기</button></div></div></div>' +
-        '<div class="section"><div class="section-title">자주 쓰는 서비스</div><div class="card card--tight"><div class="service-grid">' +
-        services
-          .map(
-            (s) =>
-              '<button class="service-item" data-action="' +
-              s[0] +
-              '"' +
-              (s[1] ? ' data-flow="' + s[1] + '"' : '') +
-              '><span class="service-item__icon">' +
-              s[2] +
-              '</span>' +
-              s[3] +
-              '</button>'
-          )
-          .join('') +
-        '</div></div></div>' +
-        '<div class="section"><div class="section-title">최근 거래 <small>가상 거래</small></div><div class="card card--tight">' +
-        txHtml +
+        '<div class="home-top">' +
+        '<div class="home-mode"><button class="is-on" data-action="noop">일반홈</button><button data-action="noop">쉬운</button></div>' +
+        '<div class="home-top__actions">' +
+        iconBtn(I.wallet, '지갑') +
+        '<button class="icon-btn ai-btn' +
+        (hasCase ? ' has-dot' : '') +
+        '" data-action="go-chat" aria-label="AI챗봇 해결패스">' +
+        I.ai +
+        '</button>' +
+        iconBtn(I.bell, '알림') +
+        iconBtn(I.menu, '전체 메뉴') +
+        '<span class="ai-tip">AI챗봇 해결패스</span>' +
         '</div></div>' +
+        '<div class="screen-body home-body">' +
+        noticeHtml +
+        '<div class="home-hero">' +
+        HOME_ART +
+        '<div class="home-hero__bar"><button class="pill-btn" data-action="noop">' +
+        I.gear +
+        '홈계좌설정</button><button class="toggle-pill' +
+        (hideBal ? ' is-on' : '') +
+        '" data-action="toggle-balance" role="switch" aria-checked="' +
+        hideBal +
+        '">잔액숨김<span class="toggle-pill__track"><span class="toggle-pill__knob"></span></span></button></div></div>' +
+        (cs.ok ? '' : notice('일시적으로 은행 시스템에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.', 'warning', I.alert)) +
+        '<div class="acct" data-action="account-detail" role="button" tabindex="0">' +
+        '<div class="acct__head"><span class="acct__logo">' +
+        I.wallet +
+        '</span><div class="acct__info"><div class="acct__name">' +
+        esc(cs.ok ? cs.data.accountName : '우리 주거래 통장') +
+        '</div><div class="acct__num">우리 ' +
+        esc(cs.ok ? cs.data.accountNumber : '1002-***-******') +
+        '<button class="acct__copy" data-action="noop" aria-label="계좌번호 복사">' +
+        I.copy +
+        '</button></div></div><button class="acct__more" data-action="noop" aria-label="계좌 메뉴">' +
+        I.more +
+        '</button></div>' +
+        '<div class="acct__tags"><span class="tag">가상 계좌</span></div>' +
+        '<div class="acct__foot"><div class="acct__bal">' +
+        balanceHtml +
+        '</div><button class="acct__btn" data-action="go-transfer">이체</button></div></div>' +
+        '<button class="home-all" data-action="account-detail">전체계좌보기</button>' +
+        '<button class="promo" data-action="go-chat"><span class="promo__text"><strong>막힌 업무, 이유부터 확인해요</strong><span>AI챗봇 해결패스가 은행 상태를 보고<br>필요한 절차만 순서대로 안내해요</span></span><span class="promo__art">' +
+        I.robot +
+        '</span></button>' +
         '<p class="fineprint">본 앱 화면은 경진대회 시연용 프로토타입입니다. 실제 은행과 연결되어 있지 않으며 모든 계좌·금액·거래는 가상 데이터입니다.</p>' +
         '</div>' +
         '<nav class="bottom-nav">' +
-        '<button class="bottom-nav__item is-active" data-action="go-home">' +
-        I.home +
-        '홈</button>' +
         '<button class="bottom-nav__item" data-action="noop">' +
         I.product +
         '상품</button>' +
-        '<button class="bottom-nav__item is-pass" data-action="open-pass"><span class="bottom-nav__dot">' +
-        I.spark +
-        '</span>해결패스</button>' +
+        '<button class="bottom-nav__item" data-action="noop">' +
+        I.pie +
+        '자산·소비</button>' +
+        '<button class="bottom-nav__item is-active" data-action="go-home">' +
+        I.homeFill +
+        '홈</button>' +
+        '<button class="bottom-nav__item" data-action="noop">' +
+        I.stock +
+        '주식</button>' +
         '<button class="bottom-nav__item" data-action="noop">' +
         I.gift +
         '혜택</button>' +
-        '<button class="bottom-nav__item" data-action="noop">' +
-        I.grid +
-        '전체</button>' +
         '</nav>'
       );
+    },
+    mount(el) {
+      bindCarousels(el);
     },
   };
 
@@ -1117,35 +1165,102 @@
     );
   }
 
+  const CHAT_CHIPS = [
+    ['이체 안 됨', '이체가 왜 안 돼?'],
+    ['이체한도', '이체한도 어디서 바꿔?'],
+    ['디지털 OTP', 'OTP 등록했는데 아직 안 돼요.'],
+    ['고객확인', '고객확인은 어떻게 해?'],
+    ['이체 결과', '이체 결과 알려줘'],
+  ];
+
+  const CHAT_CARDS = [
+    { kw: '이체', rest: '가 안 되나요?', desc: '은행 상태를 확인해 막힌 이유를 한 번에 찾아드려요', cta: '이체 상태 확인하기', action: 'diagnose', icon: I.transfer },
+    { kw: '이체한도', rest: '가 궁금하신가요?', desc: '현재 한도와 변경에 필요한 절차를 알려드려요', cta: '이체한도 물어보기', q: '이체한도 어디서 바꿔?', icon: I.gauge },
+    { kw: '이체 결과', rest: '를 확인하고 싶으신가요?', desc: '은행에서 완료로 확인된 거래만 완료라고 안내해요', cta: '이체 결과 물어보기', q: '이체 결과 알려줘', icon: I.clock },
+  ];
+
+  function pad2(n) {
+    return (n < 10 ? '0' : '') + n;
+  }
+
   SCREENS.chat = {
     title: '해결패스 질문하기',
+    white: true,
     async render() {
       const s = app().session;
-      const msgs = [
-        {
-          role: 'bot',
-          text: '안녕하세요, WON 해결패스예요.\n이체·이체한도·디지털 OTP·고객확인·이체 결과에 대해 물어보시면 은행에서 확인된 현재 상태로 안내해 드려요.',
-          links: [],
-        },
-      ].concat(s.chat);
-      return (
-        appbar('해결패스 질문하기') +
-        '<div class="screen-body" id="chat-body">' +
-        notice('규칙 기반 안내예요. 생성형 AI가 아니며, 은행에서 확인된 상태로만 답해요.', 'info', I.info) +
-        '<div class="chat-log" id="chat-log">' +
-        msgs.map(renderMessage).join('') +
+      const cs = await bank.getCustomerState();
+      const name = cs.ok ? cs.data.customerName + ' 고객님' : '고객님';
+      const now = new Date();
+      const date = now.getFullYear() + '.' + pad2(now.getMonth() + 1) + '.' + pad2(now.getDate());
+      const time = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
+
+      const welcome =
+        '<div class="chat-day"><span>' +
+        date +
+        '</span></div>' +
+        '<div class="chat-sys"><i></i>해결패스와 연결되었어요 · 규칙 기반 시뮬레이션</div>' +
+        '<div class="chat-hello"><span class="chat-avatar">' +
+        I.robot +
+        '</span><h2>' +
+        esc(name) +
+        ', 안녕하세요.<br>WON 해결패스입니다.</h2>' +
+        '<p>이체가 막혔을 때 은행에서 확인된 현재 상태로 이유와 해결 순서를 안내해 드려요. 생성형 AI가 아닌 규칙 기반 안내예요.</p>' +
+        '<div class="chat-chips">' +
+        CHAT_CHIPS.map((c) => '<button class="chat-chip" data-action="chat-suggest" data-q="' + esc(c[1]) + '">' + esc(c[0]) + '</button>').join('') +
         '</div></div>' +
-        '<div class="chat-suggest">' +
-        WSP.chatbot.SUGGESTIONS.map((q) => '<button class="chip" data-action="chat-suggest" data-q="' + esc(q) + '">' + esc(q) + '</button>').join('') +
+        '<div class="chat-cards"><div class="chat-cards__track" data-carousel>' +
+        CHAT_CARDS.map(
+          (c) =>
+            '<div class="chat-card"><span class="chat-card__icon">' +
+            c.icon +
+            '</span><h3><em>' +
+            esc(c.kw) +
+            '</em>' +
+            esc(c.rest) +
+            '</h3><p>' +
+            esc(c.desc) +
+            '</p><button class="chat-card__cta" data-action="' +
+            (c.action || 'chat-suggest') +
+            '"' +
+            (c.q ? ' data-q="' + esc(c.q) + '"' : '') +
+            '>' +
+            esc(c.cta) +
+            '</button></div>'
+        ).join('') +
         '</div>' +
-        '<div class="chat-input"><input id="chat-input" data-enter="chat-send" maxlength="120" placeholder="궁금한 점을 입력하세요" aria-label="질문 입력" autocomplete="off" /><button class="btn btn--primary" data-action="chat-send" aria-label="전송">' +
-        I.send.replace('<svg', '<svg width="20" height="20"') +
-        '</button></div>'
+        dotsHtml(CHAT_CARDS.length) +
+        '</div>' +
+        '<div class="chat-time">' +
+        time +
+        '</div>';
+
+      return (
+        appbar('해결패스와 대화중', {
+          right: '<span class="ai-badge" aria-label="규칙 기반 AI 시뮬레이션"><b>AI</b>규칙기반</span>',
+        }) +
+        '<div class="chat-tools"><button data-action="go-support">' +
+        I.headset +
+        '톡상담</button><button data-action="noop">' +
+        I.eyeOff +
+        '상담숨기기</button><button data-action="chat-reset">' +
+        I.refresh +
+        '처음으로</button></div>' +
+        '<div class="screen-body chat-body" id="chat-body">' +
+        welcome +
+        '<div class="chat-log" id="chat-log">' +
+        s.chat.map(renderMessage).join('') +
+        '</div></div>' +
+        '<div class="chat-input"><button class="icon-btn" data-action="noop" aria-label="더보기">' +
+        I.plus +
+        '</button><div class="chat-input__field"><input id="chat-input" data-enter="chat-send" maxlength="120" placeholder="메시지를 입력해 주세요" aria-label="질문 입력" autocomplete="off" /><button class="chat-input__send" data-action="chat-send" aria-label="전송">' +
+        I.send +
+        '</button></div></div>'
       );
     },
     mount(el) {
+      bindCarousels(el);
       const body = el.querySelector('#chat-body');
-      if (body) body.scrollTop = body.scrollHeight;
+      if (body && app().session.chat.length) body.scrollTop = body.scrollHeight;
     },
   };
 

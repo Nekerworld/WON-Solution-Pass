@@ -26,7 +26,8 @@ jobs:
         run: |
           mkdir -p _site
           cp index.html _site/
-          cp -r css js _site/
+          cp -r css js fonts _site/
+          test -f _site/fonts/WooridaumR.ttf
 
       - name: Check local asset references
         run: |

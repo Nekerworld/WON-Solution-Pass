@@ -33,6 +33,8 @@
       chat: [],
       lastDraft: null,
       limitSelection: null,
+      hideBalance: false,
+      hideNotice: false,
     };
   }
 
@@ -946,6 +948,21 @@
       return sendChat(input ? input.value : '');
     },
     'chat-suggest': (d) => sendChat(d.q),
+    'chat-reset': () => {
+      session.chat = [];
+      saveSession();
+      return UI.rerender();
+    },
+    'toggle-balance': () => {
+      session.hideBalance = !session.hideBalance;
+      saveSession();
+      return UI.rerender();
+    },
+    'notice-close': () => {
+      session.hideNotice = true;
+      saveSession();
+      return UI.rerender();
+    },
     'account-detail': showAccountDetail,
     'sheet-close': () => UI.closeSheet(),
     'reload-screen': () => UI.rerender(),
