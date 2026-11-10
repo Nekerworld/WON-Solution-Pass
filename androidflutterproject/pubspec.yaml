@@ -1,0 +1,38 @@
+name: won_solution_pass
+description: "WON 해결패스 - 2026 우리은행 X SSAFY 아이디어 경진대회 시연용 앱 (가상 데이터)"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.5.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  # 우리다움체: 우리금융그룹 무료 배포 TTF를 수정·변환 없이 그대로 사용한다.
+  # 지식재산권은 우리은행에 있으며 CI·BI 제작, 수정, 유료 판매는 허용되지 않는다.
+  # 세 파일의 내부 굵기 값이 모두 400이라 굵기(300/400/700)별로 family를 나눠 등록하고,
+  # 코드(lib/ui/theme.dart의 wooridaumFamily)에서 요청 굵기에 맞는 family를 고른다.
+  fonts:
+    - family: WooridaumL
+      fonts:
+        - asset: assets/fonts/WooridaumL.ttf
+          weight: 300
+    - family: WooridaumR
+      fonts:
+        - asset: assets/fonts/WooridaumR.ttf
+          weight: 400
+    - family: WooridaumB
+      fonts:
+        - asset: assets/fonts/WooridaumB.ttf
+          weight: 700
