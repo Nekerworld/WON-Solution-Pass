@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:won_solution_pass/data/key_value_storage.dart';
+import 'package:won_solution_pass/demo/demo_screen.dart';
 import 'package:won_solution_pass/domain/bank_state.dart';
 import 'package:won_solution_pass/main.dart';
 import 'package:won_solution_pass/ui/app_scope.dart';
@@ -36,10 +37,10 @@ void main() {
     expect(find.text('홍길동'), findsWidgets);
 
     await tap(tester, '이체하기');
-    see('이체가 완료되지 않았어요');
-    see('확인 결과 두 가지 조치가 필요해요.');
+    see('150만원은 나가지 않았어요');
+    see('디지털 OTP 등록과 이체한도 변경이 필요해요.');
 
-    await tap(tester, '해결 계획 보기');
+    await tap(tester, '해결 방법 보기');
     see('150만원 이체를 진행하려면\n다음 두 가지 설정이 필요합니다.');
 
     await tap(tester, '디지털 OTP 등록하러 가기');
@@ -75,7 +76,7 @@ void main() {
     await boot(tester);
     await tap(tester, '이체');
     await tap(tester, '이체하기');
-    await tap(tester, '해결 계획 보기');
+    await tap(tester, '해결 방법 보기');
     see('다음 두 가지 설정이 필요합니다.');
     await tester.tap(find.bySemanticsLabel('뒤로 가기'));
     await settle(tester);
@@ -88,8 +89,9 @@ void main() {
     services.store.update((d) => d.customer.accountRestricted = true, '테스트');
     await tap(tester, '이체');
     await tap(tester, '이체하기');
+    see('150만원은 나가지 않았어요');
     see('계좌 이용 제한이 확인되었어요.');
-    await tap(tester, '안내 보기');
+    await tap(tester, '상담 안내 보기');
     see('해결패스는 제한 해제 방법을 안내하지 않아요.');
     expect(services.store.state.transactions, isEmpty);
   });
@@ -98,20 +100,35 @@ void main() {
     await boot(tester);
     await tap(tester, '이체');
     await tap(tester, '이체하기');
-    await tap(tester, '해결 계획 보기');
+    await tap(tester, '해결 방법 보기');
     await services.controller.goHome();
     await settle(tester);
 
-    await tester.longPress(find.byWidgetPredicate((w) => w is GestureDetector && w.onLongPress != null).first);
+    await tester.tap(find.bySemanticsLabel('개발자 도구'));
     await settle(tester);
     see('DEMO CONTROL');
-    await tester.scrollUntilVisible(find.text('이벤트 로그'), 300, scrollable: find.byType(Scrollable).first);
-    await settle(tester);
+    final demoStates = tester
+        .stateList<ScrollableState>(find.descendant(of: find.byType(DemoScreen), matching: find.byType(Scrollable)))
+        .toList()
+      ..sort((a, b) => b.position.viewportDimension.compareTo(a.position.viewportDimension));
+    final demoList = demoStates.first.position;
+
+    Future<void> reveal(String text) async {
+      for (var i = 0; i < 40; i++) {
+        if (find.text(text).evaluate().isNotEmpty) return;
+        if (demoList.pixels >= demoList.maxScrollExtent) break;
+        demoList.jumpTo((demoList.pixels + 240).clamp(0, demoList.maxScrollExtent));
+        await tester.pump();
+      }
+      expect(find.text(text), findsWidgets, reason: '"$text" 문구가 보여야 함');
+    }
+
+    await reveal('이벤트 로그');
     see('상태 그래프');
     expect(find.byType(CustomPaint), findsWidgets);
 
-    await tester.dragFrom(const Offset(195, 400), const Offset(0, 5000));
-    await settle(tester);
+    demoList.jumpTo(0);
+    await tester.pump();
     await tap(tester, 'D 모두 충족');
     see('우리 주거래 통장');
     expect(find.text('DEMO CONTROL'), findsNothing);

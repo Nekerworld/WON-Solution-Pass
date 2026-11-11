@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
@@ -58,7 +59,17 @@ class _WonSolutionPassAppState extends State<WonSolutionPassApp> {
   }
 
   void _openDemo() {
-    _navigatorKey.currentState?.push(MaterialPageRoute<void>(builder: (_) => const DemoScreen()));
+    final context = _navigatorKey.currentContext;
+    if (context == null) return;
+    showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '개발자 도구 닫기',
+      barrierColor: Colors.transparent,
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (context, _, _) => const _DemoModal(),
+      transitionBuilder: (context, anim, _, child) => FadeTransition(opacity: anim, child: child),
+    );
   }
 
   @override
@@ -73,6 +84,44 @@ class _WonSolutionPassAppState extends State<WonSolutionPassApp> {
         builder: (context, child) => _PhoneFrame(child: child!),
         home: AppShell(onOpenDemo: _openDemo),
       ),
+    );
+  }
+}
+
+/// 개발자 도구. 앱 위를 블러 처리하고 시연 컨트롤을 카드로 띄운다.
+class _DemoModal extends StatelessWidget {
+  const _DemoModal();
+
+  @override
+  Widget build(BuildContext context) {
+    final padding = MediaQuery.paddingOf(context);
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            onTap: () => Navigator.of(context).pop(),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: const ColoredBox(color: Color(0x8A101820)),
+            ),
+          ),
+        ),
+        Positioned(
+          left: 12,
+          right: 12,
+          top: padding.top + 28,
+          bottom: padding.bottom + 12,
+          child: MediaQuery.removePadding(
+            context: context,
+            removeTop: true,
+            removeBottom: true,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(22),
+              child: const DemoScreen(),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

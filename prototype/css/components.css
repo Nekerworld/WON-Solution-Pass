@@ -1132,47 +1132,6 @@
 
 /* ---------- Diagnosis checklist ---------- */
 
-.check-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 14px 0 6px;
-}
-
-.check-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 11px 2px;
-  font-size: 14px;
-  border-bottom: 1px solid var(--line);
-}
-
-.check-row:last-child {
-  border-bottom: 0;
-}
-
-.check-row__label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.check-row__label small {
-  font-size: 12px;
-  color: var(--text-3);
-}
-
-.check-row__state {
-  min-width: 64px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.check-row .badge {
-  animation: pop 0.25s var(--ease) both;
-}
-
 .spinner {
   width: 18px;
   height: 18px;
@@ -1199,9 +1158,14 @@
   }
 }
 
-.diag-summary {
-  margin-top: 10px;
-  animation: fadeIn 0.3s ease both;
+.diag-sheet .sheet__title {
+  margin-bottom: 8px;
+}
+
+.diag-sheet .sheet__desc {
+  font-size: 15px;
+  line-height: 1.55;
+  margin-bottom: 18px;
 }
 
 /* ---------- Plan ---------- */
@@ -1364,23 +1328,10 @@
   padding: 0 16px 16px 50px;
 }
 
-.step__grid {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 12px;
-  font-size: 13px;
+.step__problem {
+  margin: 0 0 14px;
+  font-size: 14px;
   line-height: 1.5;
-  margin-bottom: 14px;
-}
-
-.step__grid dt {
-  color: var(--text-3);
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.step__grid dd {
-  margin: 0;
   color: var(--text);
 }
 
@@ -1388,26 +1339,6 @@
   font-size: 12px;
   color: var(--text-3);
   margin-top: 2px;
-}
-
-.plan-meta {
-  margin-top: 16px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px dashed var(--line-strong);
-  font-size: 11.5px;
-  color: var(--text-3);
-  line-height: 1.7;
-}
-
-.plan-meta code {
-  font-family: var(--mono);
-  font-size: 11px;
-  background: var(--neutral-bg);
-  padding: 1px 5px;
-  border-radius: 4px;
-  color: var(--text-2);
 }
 
 .request-summary {

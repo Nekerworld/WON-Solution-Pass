@@ -26,7 +26,7 @@ class HomeScreen extends StatelessWidget {
 
   final RouteEntry entry;
 
-  /// 숨김 시연 제어 화면 (홈 상단 길게 누르기)
+  /// 개발자 도구. 홈 상단 </> 버튼으로 연다.
   final VoidCallback? onOpenDemo;
 
   @override
@@ -67,10 +67,7 @@ class HomeScreen extends StatelessWidget {
         bottom: false,
         child: Column(
           children: [
-            GestureDetector(
-              onLongPress: onOpenDemo,
-              child: _HomeTop(hasCase: hasCase, onChat: app.goChat, onNoop: app.noop),
-            ),
+            _HomeTop(hasCase: hasCase, onChat: app.goChat, onNoop: app.noop, onDemo: onOpenDemo),
             Expanded(
               child: CustomPaint(
                 painter: const _HomeBandPainter(),
@@ -147,11 +144,12 @@ class _HomeBandPainter extends CustomPainter {
 }
 
 class _HomeTop extends StatelessWidget {
-  const _HomeTop({required this.hasCase, required this.onChat, required this.onNoop});
+  const _HomeTop({required this.hasCase, required this.onChat, required this.onNoop, required this.onDemo});
 
   final bool hasCase;
   final VoidCallback onChat;
   final VoidCallback onNoop;
+  final VoidCallback? onDemo;
 
   @override
   Widget build(BuildContext context) {
@@ -183,7 +181,7 @@ class _HomeTop extends StatelessWidget {
           AppIconButton(icon: AppIcons.wallet, label: '지갑', size: 40, color: AppColors.iconDark, onTap: onNoop),
           _AiButton(hasDot: hasCase, onTap: onChat),
           AppIconButton(icon: AppIcons.bell, label: '알림', size: 40, color: AppColors.iconDark, onTap: onNoop),
-          AppIconButton(icon: AppIcons.menu, label: '전체 메뉴', size: 40, color: AppColors.iconDark, onTap: onNoop),
+          AppIconButton(icon: AppIcons.code, label: '개발자 도구', size: 40, color: AppColors.iconDark, onTap: onDemo),
         ],
       ),
     );

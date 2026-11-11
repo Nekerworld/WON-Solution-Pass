@@ -315,70 +315,72 @@ class CaseController extends ChangeNotifier {
   }
 
   /* ==================================================================
-   * 자동 진단 (하단 시트)
+   * 자동 진단 (하단 모달)
+   * 조회는 백그라운드에서 끝내고, 돈의 행방과 다음 화면으로 가는 버튼만 보여 준다.
    * ================================================================== */
 
-  List<(String, String, String, UiTone)> _diagnosisRows(ComputeResult result) {
-    const keys = ['request', 'limit', 'otp', 'kyc', 'account', 'balance'];
-    if (!result.ok) return keys.map((k) => (k, '', '확인 불가', UiTone.neutral)).toList();
-    final ev = result.evaluation!;
-    final c = ev.ctx;
-    final f = ev.facts;
-    final g = ev.goal;
-    return [
-      ('request', '${c.recipient} · ${formatWon(c.amount)}', '확인', UiTone.info),
-      ('limit', formatWon(c.transferLimit), f['limitSufficient'] == true ? '충족' : '부족',
-          f['limitSufficient'] == true ? UiTone.success : UiTone.warning),
-      (
-        'otp',
-        c.otpRegistered ? '등록됨' : '미등록',
-        c.otpRegistered ? '정상' : (g['otpRegistered'] == true ? '등록 필요' : '이번 이체엔 불필요'),
-        c.otpRegistered ? UiTone.success : (g['otpRegistered'] == true ? UiTone.warning : UiTone.neutral),
-      ),
-      ('kyc', c.kycCompleted ? '완료' : '미완료', c.kycCompleted ? '정상' : '필요', c.kycCompleted ? UiTone.success : UiTone.warning),
-      ('account', c.accountRestricted ? '제한 확인됨' : '정상', c.accountRestricted ? '제한' : '정상',
-          c.accountRestricted ? UiTone.danger : UiTone.success),
-      ('balance', formatWon(c.balance), c.balance >= c.amount ? '충분' : '부족', c.balance >= c.amount ? UiTone.success : UiTone.danger),
-    ];
+  String _notSentTitle(int? amount) {
+    if (amount == null || amount <= 0) return '이체는 나가지 않았어요';
+    return '${formatMan(amount)}은 나가지 않았어요';
   }
 
-  DiagSummary _diagnosisSummary(ComputeResult result, String target) {
+  String _needName(String actionId) => switch (actionId) {
+        'COMPLETE_KYC' => '고객확인',
+        'REGISTER_OTP' => '디지털 OTP 등록',
+        'CHANGE_TRANSFER_LIMIT' => '이체한도 변경',
+        _ => getAction(actionId)?.label ?? '추가 설정',
+      };
+
+  String _needSentence(List<String> names) {
+    if (names.isEmpty) return '확인할 내용이 있어요.';
+    if (names.length == 1) return '${names.single}이 필요해요.';
+    if (names.length == 2) return '${names[0]}과 ${names[1]}이 필요해요.';
+    return '${names.sublist(0, names.length - 1).join(', ')}, ${names.last}이 필요해요.';
+  }
+
+  DiagSummary _diagnosisSummary(ComputeResult result, String target, {required bool isFailure}) {
     final plan = result.plan;
-    final codes = (session.caseCtx?.reasons ?? const <RejectReason>[]).map((r) => r.code).where((c) => c.isNotEmpty).toList();
-    final codeLine = codes.isNotEmpty ? '은행 응답 사유: ${codes.join(', ')}' : null;
+    final amount = result.draft?.amount ?? result.evaluation?.ctx.amount;
+    final notSent = _notSentTitle(amount);
     if (!result.ok) {
       return DiagSummary(
         tone: UiTone.danger,
-        title: '은행 상태를 확인할 수 없어 진단을 멈췄어요.',
-        body: '정상 진단을 가장하지 않고 안내를 보류할게요.',
-        buttonLabel: '안내 보기',
-        codeLine: codeLine,
+        title: isFailure ? notSent : '은행 상태를 확인할 수 없어요',
+        body: '지금은 상태를 확인할 수 없어 안내를 멈췄어요. 확인되지 않은 내용으로 방법을 만들지 않을게요.',
+        buttonLabel: '상담 안내 보기',
       );
     }
     if (target == 'support') {
       final b = plan.blocker;
-      final (title, body) = plan.status == PlanStatus.noPath
-          ? ('허용된 해결 경로를 찾지 못했어요.', '상담 절차로 안내할게요.')
+      final body = plan.status == PlanStatus.noPath
+          ? '이 안에서 해결할 방법이 없어요. 상담 안내를 확인해 주세요.'
           : b!.code == 'ACCOUNT_RESTRICTED'
-              ? ('계좌 이용 제한이 확인되었어요.', '자동 해결 경로를 만들지 않고 공식 상담 절차로 안내할게요.')
-              : (b.title, b.guidance);
-      return DiagSummary(tone: UiTone.danger, title: title, body: body, buttonLabel: '안내 보기', codeLine: codeLine);
+              ? '계좌 이용 제한이 확인되었어요. 제한을 푸는 방법은 안내하지 않고 상담으로 연결할게요.'
+              : b.guidance;
+      return DiagSummary(
+        tone: UiTone.danger,
+        title: isFailure ? notSent : (b?.title ?? '상담 안내가 필요해요'),
+        body: body,
+        buttonLabel: '상담 안내 보기',
+      );
     }
     if (plan.status == PlanStatus.ready) {
       return DiagSummary(
         tone: UiTone.success,
-        title: '추가 조치 없이 이체할 수 있어요.',
-        body: '원래 이체 정보를 그대로 유지했어요.',
-        buttonLabel: '해결 계획 보기',
-        codeLine: codeLine,
+        title: isFailure ? notSent : '추가 절차 없이 보낼 수 있어요',
+        body: '받는 분과 금액은 그대로예요. 확인한 뒤 직접 보내 주세요.',
+        buttonLabel: '확인하러 가기',
       );
     }
+    final names = plan.actionSteps.map((s) => _needName(s.actionId)).toList();
+    final manualTitle = amount != null && amount > 0
+        ? '${formatMan(amount)} 이체에는 ${countWord(names.length)} 가지가 필요해요'
+        : '${countWord(names.length)} 가지 설정이 필요해요';
     return DiagSummary(
       tone: UiTone.info,
-      title: '확인 결과 ${countWord(plan.actionSteps.length)} 가지 조치가 필요해요.',
-      body: plan.evaluation!.requirements.map((r) => r.title).join(' · '),
-      buttonLabel: '해결 계획 보기',
-      codeLine: codeLine,
+      title: isFailure ? notSent : manualTitle,
+      body: _needSentence(names),
+      buttonLabel: '해결 방법 보기',
     );
   }
 
@@ -434,25 +436,21 @@ class CaseController extends ChangeNotifier {
       }
 
       final myEpoch = _epoch;
-      final diag = DiagnosisSheetState(isFailure: trigger == 'TRANSFER_FAILED');
-      _openSheet(diag, onClose: () => _resolveContinue('dismissed'));
+      final isFailure = trigger == 'TRANSFER_FAILED';
       final started = DateTime.now();
       final result = await _compute();
       final elapsed = DateTime.now().difference(started).inMilliseconds;
-      if (elapsed < 650) await _sleep(650 - elapsed);
-      if (myEpoch != _epoch) return;
-      for (final (key, sub, text, tone) in _diagnosisRows(result)) {
-        diag.revealRow(key, sub, text, tone);
-        await _sleep(110);
-      }
+      if (elapsed < 280) await _sleep(280 - elapsed);
       if (myEpoch != _epoch) return;
       final target = _applyPlanToFsm(result);
-      diag.showSummary(_diagnosisSummary(result, target));
+      final diag = DiagnosisSheetState();
+      diag.showSummary(_diagnosisSummary(result, target, isFailure: isFailure));
+      _openSheet(diag, onClose: () => _resolveContinue('dismissed'));
       final choice = await _waitForContinue();
       if (myEpoch != _epoch) return;
       if (choice != 'continue') {
-        events.add('APP', '진단 결과 확인 후 시트를 닫음 (해결패스에서 다시 볼 수 있음)');
-        toast('진단 결과는 홈의 해결패스에서 다시 볼 수 있어요.');
+        events.add('APP', '안내 모달을 닫음 (홈 알림에서 이어서 볼 수 있음)');
+        toast('홈 알림에서 이어서 볼 수 있어요.');
         return;
       }
       closeSheet();
@@ -761,9 +759,12 @@ class CaseController extends ChangeNotifier {
       _setTransferLoading(true);
       await _approveAndSubmit(draft);
     } finally {
-      _transferBusy = false;
-      _setTransferLoading(false);
-      if (diagnoseWith != null) await startDiagnosis('TRANSFER_FAILED', diagnoseWith);
+      try {
+        if (diagnoseWith != null) await startDiagnosis('TRANSFER_FAILED', diagnoseWith);
+      } finally {
+        _transferBusy = false;
+        _setTransferLoading(false);
+      }
     }
   }
 

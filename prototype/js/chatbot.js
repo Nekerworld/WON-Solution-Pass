@@ -310,7 +310,7 @@
     if (analysis.claims.limitChanged) {
       if (ctx.transferLimit >= ctx.amount) parts.push('이체한도 변경이 확인되었습니다. (현재 1일 이체한도 ' + fmt(ctx.transferLimit) + ')');
       else {
-        parts.push('은행 기록상 현재 1일 이체한도는 ' + fmt(ctx.transferLimit) + '로, 요청 금액보다 낮습니다.');
+        parts.push('은행 기록상 현재 1일 이체한도는 ' + fmt(ctx.transferLimit) + '으로, 요청 금액보다 낮습니다.');
         tone = 'warning';
       }
     }

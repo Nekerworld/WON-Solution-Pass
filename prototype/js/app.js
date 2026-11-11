@@ -148,108 +148,82 @@
   }
 
   /* ==================================================================
-   * 자동 진단 (하단 시트)
+   * 자동 진단 결과 안내 (하단 시트)
    * ================================================================== */
 
-  const DIAG_ROWS = [
-    ['request', '이체 요청 정보'],
-    ['limit', '1일 이체한도'],
-    ['otp', '디지털 OTP'],
-    ['kyc', '고객확인'],
-    ['account', '계좌 이용 상태'],
-    ['balance', '출금 가능 잔액'],
-  ];
+  const NEED_NAMES = { COMPLETE_KYC: '고객확인', REGISTER_OTP: '디지털 OTP 등록', CHANGE_TRANSFER_LIMIT: '이체한도 변경' };
 
-  function diagnosisSheetHtml(isFailure) {
-    return (
-      '<h3 class="sheet__title">' +
-      (isFailure ? '이체가 완료되지 않았어요' : '현재 상태를 확인하고 있어요') +
-      '</h3><p class="sheet__desc">현재 설정을 확인하고 필요한 절차를 찾고 있습니다.</p>' +
-      '<div class="check-list">' +
-      DIAG_ROWS.map(
-        (r) =>
-          '<div class="check-row" data-row="' +
-          r[0] +
-          '"><span class="check-row__label">' +
-          r[1] +
-          '<small data-sub></small></span><span class="check-row__state"><span class="spinner"></span></span></div>'
-      ).join('') +
-      '</div><div id="diag-summary"></div>' +
-      '<p class="fineprint">은행이 이미 보유한 정보로 확인해요. 따로 입력하실 내용은 없어요.</p>'
-    );
+  function notSentTitle(amount) {
+    if (!amount || amount <= 0) return '이체는 나가지 않았어요';
+    return man(amount) + '은 나가지 않았어요';
   }
 
-  function diagnosisRows(result) {
-    if (!result.ok) {
-      return DIAG_ROWS.map((r) => ({ key: r[0], sub: '', badge: ['확인 불가', 'neutral'] }));
-    }
-    const ev = result.evaluation;
-    const c = ev.ctx;
-    const f = ev.facts;
-    const g = ev.goal;
-    return [
-      { key: 'request', sub: c.recipient + ' · ' + fmt(c.amount), badge: ['확인', 'info'] },
-      { key: 'limit', sub: fmt(c.transferLimit), badge: f.limitSufficient ? ['충족', 'success'] : ['부족', 'warning'] },
-      {
-        key: 'otp',
-        sub: c.otpRegistered ? '등록됨' : '미등록',
-        badge: c.otpRegistered ? ['정상', 'success'] : g.otpRegistered ? ['등록 필요', 'warning'] : ['이번 이체엔 불필요', 'neutral'],
-      },
-      { key: 'kyc', sub: c.kycCompleted ? '완료' : '미완료', badge: c.kycCompleted ? ['정상', 'success'] : ['필요', 'warning'] },
-      { key: 'account', sub: c.accountRestricted ? '제한 확인됨' : '정상', badge: c.accountRestricted ? ['제한', 'danger'] : ['정상', 'success'] },
-      { key: 'balance', sub: fmt(c.balance), badge: c.balance >= c.amount ? ['충분', 'success'] : ['부족', 'danger'] },
-    ];
+  function needName(actionId) {
+    if (NEED_NAMES[actionId]) return NEED_NAMES[actionId];
+    const a = PF.getAction(actionId);
+    return a ? a.label : '추가 설정';
   }
 
-  async function revealDiagnosis(sheet, result) {
-    const rows = diagnosisRows(result);
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
-      const row = sheet.querySelector('[data-row="' + r.key + '"]');
-      if (!row) continue;
-      row.querySelector('[data-sub]').textContent = r.sub;
-      row.querySelector('.check-row__state').innerHTML = UI.badge(r.badge[0], r.badge[1]);
-      await sleep(110);
-    }
+  function needSentence(names) {
+    if (!names.length) return '확인할 내용이 있어요.';
+    if (names.length === 1) return names[0] + '이 필요해요.';
+    if (names.length === 2) return names[0] + '과 ' + names[1] + '이 필요해요.';
+    return names.slice(0, -1).join(', ') + ', ' + names[names.length - 1] + '이 필요해요.';
   }
 
-  function diagnosisSummaryHtml(result, target) {
+  /** @returns {{title: string, body: string, button: string}} */
+  function diagnosisSummary(result, target, isFailure) {
     const plan = result.plan;
-    const reasons = (session.caseCtx && session.caseCtx.reasons) || [];
-    const codes = reasons.map((r) => r.code).filter(Boolean);
-    const codeLine = codes.length ? '<div class="step__note mt-8">은행 응답 사유: ' + codes.join(', ') + '</div>' : '';
-    let html;
-    let btn = '해결 계획 보기';
+    const amount = result.draft ? result.draft.amount : result.evaluation ? result.evaluation.ctx.amount : null;
+    const notSent = notSentTitle(amount);
     if (!result.ok) {
-      html =
-        '<div class="notice notice--danger">' +
-        UI.I.alert +
-        '<div><strong>은행 상태를 확인할 수 없어 진단을 멈췄어요.</strong><br>정상 진단을 가장하지 않고 안내를 보류할게요.</div></div>';
-      btn = '안내 보기';
-    } else if (target === 'support') {
-      const b = plan.blocker;
-      const msg =
-        plan.status === 'NO_PATH'
-          ? '<strong>허용된 해결 경로를 찾지 못했어요.</strong><br>상담 절차로 안내할게요.'
-          : b.code === 'ACCOUNT_RESTRICTED'
-          ? '<strong>계좌 이용 제한이 확인되었어요.</strong><br>자동 해결 경로를 만들지 않고 공식 상담 절차로 안내할게요.'
-          : '<strong>' + UI.esc(b.title) + '</strong><br>' + UI.esc(b.guidance);
-      html = '<div class="notice notice--danger">' + UI.I.alert + '<div>' + msg + '</div></div>';
-      btn = '안내 보기';
-    } else if (plan.status === 'READY') {
-      html = '<div class="notice notice--success">' + UI.I.check + '<div><strong>추가 조치 없이 이체할 수 있어요.</strong><br>원래 이체 정보를 그대로 유지했어요.</div></div>';
-    } else {
-      const n = plan.actionSteps.length;
-      html =
-        '<div class="notice notice--info">' +
-        UI.I.spark +
-        '<div><strong>확인 결과 ' +
-        WSP.chatbot.countWord(n) +
-        ' 가지 조치가 필요해요.</strong><br>' +
-        plan.evaluation.requirements.map((r) => UI.esc(r.title)).join(' · ') +
-        '</div></div>';
+      return {
+        title: isFailure ? notSent : '은행 상태를 확인할 수 없어요',
+        body: '지금은 상태를 확인할 수 없어 안내를 멈췄어요. 확인되지 않은 내용으로 방법을 만들지 않을게요.',
+        button: '상담 안내 보기',
+      };
     }
-    return '<div class="diag-summary">' + html + codeLine + '<button class="btn btn--primary btn--block mt-12" data-action="diag-continue">' + btn + '</button></div>';
+    if (target === 'support') {
+      const b = plan.blocker;
+      const body =
+        plan.status === 'NO_PATH'
+          ? '이 안에서 해결할 방법이 없어요. 상담 안내를 확인해 주세요.'
+          : b.code === 'ACCOUNT_RESTRICTED'
+          ? '계좌 이용 제한이 확인되었어요. 제한을 푸는 방법은 안내하지 않고 상담으로 연결할게요.'
+          : b.guidance;
+      return {
+        title: isFailure ? notSent : (b && b.title) || '상담 안내가 필요해요',
+        body: body,
+        button: '상담 안내 보기',
+      };
+    }
+    if (plan.status === 'READY') {
+      return {
+        title: isFailure ? notSent : '추가 절차 없이 보낼 수 있어요',
+        body: '받는 분과 금액은 그대로예요. 확인한 뒤 직접 보내 주세요.',
+        button: '확인하러 가기',
+      };
+    }
+    const names = plan.actionSteps.map((s) => needName(s.actionId));
+    const count = WSP.chatbot.countWord(names.length);
+    const manualTitle = amount > 0 ? man(amount) + ' 이체에는 ' + count + ' 가지가 필요해요' : count + ' 가지 설정이 필요해요';
+    return {
+      title: isFailure ? notSent : manualTitle,
+      body: needSentence(names),
+      button: '해결 방법 보기',
+    };
+  }
+
+  function diagnosisSheetHtml(summary) {
+    return (
+      '<div class="diag-sheet"><h3 class="sheet__title">' +
+      UI.esc(summary.title) +
+      '</h3><p class="sheet__desc">' +
+      UI.esc(summary.body) +
+      '</p><button class="btn btn--primary btn--lg btn--block" data-action="diag-continue">' +
+      UI.esc(summary.button) +
+      '</button></div>'
+    );
   }
 
   /**
@@ -312,24 +286,21 @@
       }
 
       const myEpoch = epoch;
-      const sheet = UI.openSheet(diagnosisSheetHtml(trigger === 'TRANSFER_FAILED'), {
-        onClose: () => resolveContinue('dismissed'),
-      });
+      const isFailure = trigger === 'TRANSFER_FAILED';
       const started = Date.now();
       const result = await computeFromBank();
       const elapsed = Date.now() - started;
-      if (elapsed < 650) await sleep(650 - elapsed);
-      if (myEpoch !== epoch) return;
-      await revealDiagnosis(sheet, result);
+      if (elapsed < 280) await sleep(280 - elapsed);
       if (myEpoch !== epoch) return;
       const target = applyPlanToFsm(result);
-      const summary = sheet.querySelector('#diag-summary');
-      if (summary) summary.innerHTML = diagnosisSummaryHtml(result, target);
+      UI.openSheet(diagnosisSheetHtml(diagnosisSummary(result, target, isFailure)), {
+        onClose: () => resolveContinue('dismissed'),
+      });
       const choice = await waitForContinue();
       if (myEpoch !== epoch) return;
       if (choice !== 'continue') {
-        events.add('APP', '진단 결과 확인 후 시트를 닫음 (해결패스에서 다시 볼 수 있음)');
-        UI.toast('진단 결과는 홈의 해결패스에서 다시 볼 수 있어요.');
+        events.add('APP', '안내 모달을 닫음 (홈 알림에서 이어서 볼 수 있음)');
+        UI.toast('홈 알림에서 이어서 볼 수 있어요.');
         return;
       }
       UI.closeSheet();
@@ -381,10 +352,10 @@
     let msg;
     let tone;
     if (result.plan.status === 'READY') {
-      msg = (resolved.length ? resolved.join(', ') + ' 완료를 확인했어요. ' : '') + '모든 사전 조건을 충족했어요.';
+      msg = (resolved.length ? resolved.join(', ') + ' 완료를 확인했어요. ' : '') + '이제 원래 이체로 돌아갈 수 있어요.';
       tone = 'success';
     } else if (resolved.length) {
-      msg = resolved.join(', ') + ' 완료를 은행에서 확인했어요. 남은 경로를 다시 계산했어요.';
+      msg = resolved.join(', ') + ' 완료를 은행에서 확인했어요. 남은 단계를 다시 정리했어요.';
       tone = 'success';
     } else {
       msg = '아직 바뀐 상태가 없어요. 남은 절차를 진행해 주세요.';

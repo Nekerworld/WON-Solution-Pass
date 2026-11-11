@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../app/case_controller.dart';
 import '../app/overlays.dart';
 import '../domain/formatters.dart';
-import 'icons.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -138,73 +137,20 @@ class _DiagnosisSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final summary = sheet.summary;
+    if (summary == null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 28),
+        child: Center(child: Spinner()),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _SheetTitle(sheet.isFailure ? '이체가 완료되지 않았어요' : '현재 상태를 확인하고 있어요', '현재 설정을 확인하고 필요한 절차를 찾고 있습니다.'),
-        const SizedBox(height: 14),
-        for (var i = 0; i < sheet.rows.length; i++)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 11),
-            decoration: BoxDecoration(
-              border: i == sheet.rows.length - 1 ? null : const Border(bottom: BorderSide(color: AppColors.line)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(sheet.rows[i].label, style: ts(14)),
-                      if (sheet.rows[i].sub.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(sheet.rows[i].sub, style: ts(12, color: AppColors.text3)),
-                      ],
-                    ],
-                  ),
-                ),
-                SizedBox(
-                  width: 120,
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: sheet.rows[i].badge == null
-                        ? const Spinner()
-                        : ToneBadge(sheet.rows[i].badge!.text, sheet.rows[i].badge!.tone, pop: true),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        if (summary != null)
-          FadeIn(
-            duration: const Duration(milliseconds: 300),
-            child: Padding(
-              padding: const EdgeInsets.only(top: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  NoticeBox(
-                    title: summary.title,
-                    body: summary.body,
-                    tone: summary.tone,
-                    icon: switch (summary.tone) {
-                      UiTone.success => AppIcons.check,
-                      UiTone.danger => AppIcons.alert,
-                      _ => AppIcons.spark,
-                    },
-                  ),
-                  if (summary.codeLine != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(summary.codeLine!, style: ts(12, color: AppColors.text3)),
-                    ),
-                  const SizedBox(height: 12),
-                  AppButton(summary.buttonLabel, onPressed: app.diagContinue),
-                ],
-              ),
-            ),
-          ),
-        const Fineprint('은행이 이미 보유한 정보로 확인해요. 따로 입력하실 내용은 없어요.'),
+        Text(summary.title, style: ts(20, weight: FontWeight.w700, height: 1.4, letterSpacing: -0.03)),
+        const SizedBox(height: 8),
+        Text(summary.body, style: ts(15, color: AppColors.text2, height: 1.55)),
+        const SizedBox(height: 18),
+        AppButton(summary.buttonLabel, size: BtnSize.lg, onPressed: app.diagContinue),
       ],
     );
   }

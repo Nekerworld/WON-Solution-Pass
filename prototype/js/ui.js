@@ -421,6 +421,8 @@
     return WSP.chatbot.countWord(n);
   }
 
+  const PILL_LABELS = { otpRegistered: 'OTP 없음', limitSufficient: '한도 부족', kycCompleted: '고객확인 필요' };
+
   function stepCard(item, idx) {
     const a = PF.getAction(item.actionId);
     const d = PF.describeStep(item.actionId, item.ctx);
@@ -437,22 +439,9 @@
         item.actionId === 'RETURN_TO_TRANSFER'
           ? '<button class="btn btn--primary btn--block" data-action="return-to-transfer">' + esc(a.cta) + '</button>'
           : '<button class="btn btn--primary btn--block" data-action="open-flow" data-flow="' + a.flowId + '">' + esc(a.cta) + '</button>';
-      body =
-        '<div class="step__body"><dl class="step__grid">' +
-        '<dt>해결할 문제</dt><dd>' +
-        esc(d.problem) +
-        '</dd><dt>현재 상태</dt><dd>' +
-        esc(d.current) +
-        '</dd><dt>필요한 행동</dt><dd>' +
-        esc(d.action) +
-        '</dd><dt>예상 결과</dt><dd>' +
-        esc(d.expected) +
-        '</dd></dl>' +
-        btn +
-        (d.ruleIds.length ? '<div class="step__note mt-8">근거 규칙 ' + d.ruleIds.join(' · ') + ' (데모용 가상 정책)</div>' : '') +
-        '</div>';
+      body = '<div class="step__body"><p class="step__problem">' + esc(d.problem) + '</p>' + btn + '</div>';
     } else if (item.mode === 'done') {
-      body = '<div class="step__body"><div class="step__note">' + esc(d.current) + ' · 은행 상태 재조회로 확인됨 (상태 v' + item.ctx.stateVersion + ')</div></div>';
+      body = '<div class="step__body"><div class="step__note">' + esc(a.label) + '을 마쳤어요.</div></div>';
     } else {
       body = '<div class="step__body"><div class="step__note">' + esc(item.lockReason || '이전 단계를 마치면 진행할 수 있어요.') + '</div></div>';
     }
@@ -505,14 +494,14 @@
       doneIds.forEach((id) => items.push({ actionId: id, mode: 'done', ctx: ctx }));
       plan.actionSteps.forEach((st, i) => {
         let lockReason = '';
-        if (i > 0) lockReason = PF.getAction(plan.actionSteps[i - 1].actionId).label + '을 마친 뒤 진행할 수 있어요. (사전 조건)';
+        if (i > 0) lockReason = PF.getAction(plan.actionSteps[i - 1].actionId).label + '을 마친 뒤 진행할 수 있어요.';
         items.push({ actionId: st.actionId, mode: i === 0 ? 'current' : 'locked', ctx: ctx, lockReason: lockReason });
       });
       items.push({
         actionId: 'RETURN_TO_TRANSFER',
         mode: plan.status === 'READY' ? 'current' : 'locked',
         ctx: ctx,
-        lockReason: '모든 사전 조건이 확인되면 원래 이체로 돌아갈 수 있어요.',
+        lockReason: '필요한 설정을 마치면 원래 이체로 돌아갈 수 있어요.',
       });
 
       const n = plan.actionSteps.length;
@@ -531,11 +520,9 @@
         heroTitle = man(ctx.amount) + ' 이체를 진행하려면<br>다음 ' + countWord(n) + ' 가지 설정이 필요합니다.';
       }
 
-      const pills = ev.requirements.map((r) => '<span class="plan-hero__pill">' + esc(r.title) + '</span>').join('');
+      const pills = ev.requirements.map((r) => '<span class="plan-hero__pill">' + esc(PILL_LABELS[r.fact] || r.title) + '</span>').join('');
 
       const recheckBar = params && params.rechecking ? '<div class="recheck-bar" id="recheck-bar"><span class="spinner"></span>변경된 상태를 은행에서 다시 확인하고 있어요</div>' : '';
-
-      const checkedAt = ctx.checkedAt ? new Date(ctx.checkedAt).toLocaleTimeString('ko-KR', { hour12: false }) : '-';
 
       return (
         appbar('WON 해결패스', { right: right }) +
@@ -564,23 +551,8 @@
         items.map((it, i) => stepCard(it, i)).join('') +
         '</div>' +
         '<div class="mt-16">' +
-        notice('AI는 OTP 번호나 비밀번호를 묻지 않아요. 인증과 이체 승인은 은행 화면에서 직접 진행해요.', '', I.lock) +
+        notice('비밀번호나 OTP 번호는 묻지 않아요. 인증과 이체 승인은 직접 진행해요.', '', I.lock) +
         '</div>' +
-        '<div class="plan-meta">근거 규칙 ' +
-        (ev.firedRules.length ? ev.firedRules.map((r) => '<code>' + r + '</code>').join(' ') : '<code>없음</code>') +
-        '<br>정책 <code>' +
-        esc(ev.policyVersion) +
-        '</code> 데모용 가상 정책 · 실제 은행 정책 아님<br>상태 버전 <code>v' +
-        ctx.stateVersion +
-        '</code> · ' +
-        checkedAt +
-        ' 조회 · 상태 그래프 ' +
-        plan.visited +
-        '개 상태' +
-        (plan.cost != null ? ' · 최소 비용 경로 ' + plan.cost : '') +
-        '<br>사건 번호 <code>' +
-        esc(caseCtx.caseId) +
-        '</code></div>' +
         '<div class="text-center mt-12"><button class="link-btn" data-action="go-chat">궁금한 점이 있나요? 질문하기</button></div>' +
         '</div>'
       );
@@ -618,10 +590,8 @@
           appbar('디지털 OTP 등록', { noBack: true }) +
           '<div class="screen-body"><div class="result"><div class="result__icon result__icon--success">' +
           I.check +
-          '</div><h2 class="result__title">디지털 OTP 등록이 완료되었어요</h2><p class="result__desc">은행 상태에 반영되었어요. (상태 v' +
-          esc(p.stateVersion) +
-          ')</p></div>' +
-          (waiting ? notice('해결패스로 돌아가면 은행 상태를 다시 조회하고 남은 경로를 다시 계산해요.', 'info', I.spark) : '') +
+          '</div><h2 class="result__title">디지털 OTP 등록이 완료되었어요</h2><p class="result__desc">은행 상태에 반영되었어요.</p></div>' +
+          (waiting ? notice('해결패스로 돌아가면 바뀐 설정을 은행에서 다시 확인하고 남은 단계를 알려 드려요.', 'info', I.spark) : '') +
           '</div><div class="screen-footer">' +
           (waiting
             ? '<button class="btn btn--primary btn--lg btn--block" data-action="flow-return">해결패스로 돌아가기</button>'
@@ -686,10 +656,8 @@
           fmt(p.newLimit) +
           '</div><p class="result__desc">이전 한도 ' +
           fmt(p.previousLimit) +
-          ' · 은행 상태에 반영됨 (상태 v' +
-          esc(p.stateVersion) +
-          ')</p></div>' +
-          (waiting ? notice('해결패스로 돌아가면 은행 상태를 다시 조회하고 남은 경로를 다시 계산해요.', 'info', I.spark) : '') +
+          ' · 은행 상태에 반영되었어요.</p></div>' +
+          (waiting ? notice('해결패스로 돌아가면 바뀐 설정을 은행에서 다시 확인하고 남은 단계를 알려 드려요.', 'info', I.spark) : '') +
           '</div><div class="screen-footer">' +
           (waiting
             ? '<button class="btn btn--primary btn--lg btn--block" data-action="flow-return">해결패스로 돌아가기</button>'
@@ -730,10 +698,10 @@
       let checkHtml = '';
       if (p.check) {
         if (p.check.allowed) {
-          checkHtml = notice('<strong>' + fmt(p.check.value) + '</strong>로 변경할 수 있어요. 아래 버튼을 눌러 변경을 확정해 주세요.', 'success', I.check);
+          checkHtml = notice('<strong>' + fmt(p.check.value) + '</strong>으로 변경할 수 있어요. 아래 버튼을 눌러 변경을 확정해 주세요.', 'success', I.check);
         } else {
           checkHtml = notice(
-            '<strong>' + fmt(p.check.value) + '</strong>로 변경할 수 없어요.<br>' + p.check.reasons.map((r) => '· ' + esc(r.message)).join('<br>'),
+            '<strong>' + fmt(p.check.value) + '</strong>으로 변경할 수 없어요.<br>' + p.check.reasons.map((r) => '· ' + esc(r.message)).join('<br>'),
             'danger',
             I.alert
           );
@@ -766,7 +734,7 @@
         checkHtml +
         '<p class="fineprint">데모용 가상 정책: ' +
         fmt(P.maxLimitWithoutOtp) +
-        '를 초과하는 한도는 디지털 OTP 등록 후 변경할 수 있어요. 실제 우리은행 정책이 아닙니다. 변경 가능 여부는 가상 은행이 판정합니다.</p>' +
+        '을 초과하는 한도는 디지털 OTP 등록 후 변경할 수 있어요. 실제 우리은행 정책이 아닙니다. 변경 가능 여부는 가상 은행이 판정합니다.</p>' +
         '</div><div class="screen-footer">' +
         footer +
         '</div>'
@@ -803,10 +771,8 @@
           appbar('고객확인', { noBack: true }) +
           '<div class="screen-body"><div class="result"><div class="result__icon result__icon--success">' +
           I.check +
-          '</div><h2 class="result__title">고객확인이 완료되었어요</h2><p class="result__desc">은행 상태에 반영되었어요. (상태 v' +
-          esc(p.stateVersion) +
-          ')</p></div>' +
-          (waiting ? notice('해결패스로 돌아가면 은행 상태를 다시 조회하고 남은 경로를 다시 계산해요.', 'info', I.spark) : '') +
+          '</div><h2 class="result__title">고객확인이 완료되었어요</h2><p class="result__desc">은행 상태에 반영되었어요.</p></div>' +
+          (waiting ? notice('해결패스로 돌아가면 바뀐 설정을 은행에서 다시 확인하고 남은 단계를 알려 드려요.', 'info', I.spark) : '') +
           '</div><div class="screen-footer">' +
           (waiting
             ? '<button class="btn btn--primary btn--lg btn--block" data-action="flow-return">해결패스로 돌아가기</button>'
@@ -1017,7 +983,7 @@
     QUERY_FAILURE: {
       icon: 'alert',
       title: '은행 상태 조회에 실패했어요',
-      desc: '상태를 확인하지 못해 해결 경로를 계산하지 않았어요. 정상 진단을 가장하지 않아요. 잠시 후 다시 확인해 주세요.',
+      desc: '지금은 상태를 확인할 수 없어 안내를 멈췄어요. 확인되지 않은 내용으로 방법을 만들지 않을게요. 잠시 후 다시 확인해 주세요.',
       primary: ['diagnose', '다시 확인하기'],
     },
     ACCOUNT_RESTRICTED: {

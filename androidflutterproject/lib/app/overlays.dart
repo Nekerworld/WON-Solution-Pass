@@ -26,48 +26,18 @@ abstract class SheetState extends ChangeNotifier {
   }
 }
 
-class DiagRow {
-  DiagRow(this.key, this.label);
-
-  final String key;
-  final String label;
-  String sub = '';
-
-  /// null이면 조회 중(스피너)
-  ({String text, UiTone tone})? badge;
-}
-
 class DiagSummary {
-  const DiagSummary({required this.tone, required this.title, required this.body, required this.buttonLabel, this.codeLine});
+  const DiagSummary({required this.tone, required this.title, required this.body, required this.buttonLabel});
 
   final UiTone tone;
   final String title;
   final String body;
   final String buttonLabel;
-  final String? codeLine;
 }
 
-/// 자동 진단 시트: 6개 항목을 순서대로 조회해 표시하고, 요약 버튼을 눌러야 다음으로 진행한다.
+/// 이체 실패 뒤 하단 모달. 조회 과정은 보여 주지 않고, 결과와 다음 화면으로 가는 버튼만 둔다.
 class DiagnosisSheetState extends SheetState {
-  DiagnosisSheetState({required this.isFailure});
-
-  final bool isFailure;
-  final List<DiagRow> rows = [
-    DiagRow('request', '이체 요청 정보'),
-    DiagRow('limit', '1일 이체한도'),
-    DiagRow('otp', '디지털 OTP'),
-    DiagRow('kyc', '고객확인'),
-    DiagRow('account', '계좌 이용 상태'),
-    DiagRow('balance', '출금 가능 잔액'),
-  ];
   DiagSummary? summary;
-
-  void revealRow(String key, String sub, String text, UiTone tone) {
-    final row = rows.firstWhere((r) => r.key == key);
-    row.sub = sub;
-    row.badge = (text: text, tone: tone);
-    notifyListeners();
-  }
 
   void showSummary(DiagSummary value) {
     summary = value;

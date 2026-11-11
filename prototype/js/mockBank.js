@@ -86,7 +86,7 @@
     if (newLimit > P.maxLimitWithoutOtp && !s.customer.digitalOtpRegistered) {
       reasons.push({
         code: 'OTP_REQUIRED_FOR_LIMIT',
-        message: fmt(P.maxLimitWithoutOtp) + '를 초과하는 한도는 디지털 OTP 등록 후 변경할 수 있습니다. (가상 정책)',
+        message: fmt(P.maxLimitWithoutOtp) + '을 초과하는 한도는 디지털 OTP 등록 후 변경할 수 있습니다. (가상 정책)',
       });
     }
     return reasons;

@@ -65,13 +65,13 @@ class PlanScreen extends StatelessWidget {
           plan.actionSteps[i].actionId,
           i == 0 ? _StepMode.current : _StepMode.locked,
           ctx,
-          i > 0 ? '${getAction(plan.actionSteps[i - 1].actionId)!.label}을 마친 뒤 진행할 수 있어요. (사전 조건)' : '',
+          i > 0 ? '${getAction(plan.actionSteps[i - 1].actionId)!.label}을 마친 뒤 진행할 수 있어요.' : '',
         ),
       _StepItem(
         'RETURN_TO_TRANSFER',
         plan.status == PlanStatus.ready ? _StepMode.current : _StepMode.locked,
         ctx,
-        '모든 사전 조건이 확인되면 원래 이체로 돌아갈 수 있어요.',
+        '필요한 설정을 마치면 원래 이체로 돌아갈 수 있어요.',
       ),
     ];
 
@@ -92,12 +92,10 @@ class PlanScreen extends StatelessWidget {
       heroTitle = '${formatMan(ctx.amount)} 이체를 진행하려면\n다음 ${countWord(n)} 가지 설정이 필요합니다.';
     }
 
-    final checkedAt = ctx.checkedAt != null ? formatClock(DateTime.fromMillisecondsSinceEpoch(ctx.checkedAt!)) : '-';
-
     return ScreenFrame(
       appBar: WspAppBar(title: 'WON 해결패스', onBack: app.back, right: refresh),
       children: [
-        _PlanHero(eyebrow: eyebrow, title: heroTitle, ready: ready, pills: ev.requirements.map((r) => r.title).toList()),
+        _PlanHero(eyebrow: eyebrow, title: heroTitle, ready: ready, pills: ev.requirements.map(_pillLabel).toList()),
         if (entry.params['rechecking'] == true) const _RecheckBar(),
         const SizedBox(height: 12),
         CardBox(
@@ -131,23 +129,20 @@ class PlanScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        NoticeBox(body: 'AI는 OTP 번호나 비밀번호를 묻지 않아요. 인증과 이체 승인은 은행 화면에서 직접 진행해요.', icon: AppIcons.lock),
-        const SizedBox(height: 16),
-        _PlanMeta(
-          firedRules: ev.firedRules,
-          policyVersion: ev.policyVersion,
-          stateVersion: ctx.stateVersion,
-          checkedAt: checkedAt,
-          visited: plan.visited,
-          cost: plan.cost,
-          caseId: caseCtx.caseId,
-        ),
+        NoticeBox(body: '비밀번호나 OTP 번호는 묻지 않아요. 인증과 이체 승인은 직접 진행해요.', icon: AppIcons.lock),
         const SizedBox(height: 12),
         Center(child: LinkButton('궁금한 점이 있나요? 질문하기', onTap: app.goChat)),
       ],
     );
   }
 }
+
+String _pillLabel(Requirement r) => switch (r.fact) {
+      'otpRegistered' => 'OTP 없음',
+      'limitSufficient' => '한도 부족',
+      'kycCompleted' => '고객확인 필요',
+      _ => r.title,
+    };
 
 class _PlanHero extends StatelessWidget {
   const _PlanHero({required this.eyebrow, required this.title, required this.ready, required this.pills});
@@ -253,30 +248,21 @@ class _StepCard extends StatelessWidget {
       _StepMode.locked => const ToneBadge('대기', UiTone.neutral),
     };
 
-    Widget body;
+    final Widget body;
     if (mode == _StepMode.current) {
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _StepGrid(rows: [
-            ('해결할 문제', d.problem),
-            ('현재 상태', d.current),
-            ('필요한 행동', d.action),
-            ('예상 결과', d.expected),
-          ]),
+          Text(d.problem, style: ts(14, height: 1.5)),
           const SizedBox(height: 14),
           AppButton(
             a.cta,
             onPressed: item.actionId == 'RETURN_TO_TRANSFER' ? app.returnToTransfer : () => app.openFlow(a.flowId),
           ),
-          if (d.ruleIds.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _Note('근거 규칙 ${d.ruleIds.join(' · ')} (데모용 가상 정책)'),
-          ],
         ],
       );
     } else if (mode == _StepMode.done) {
-      body = _Note('${d.current} · 은행 상태 재조회로 확인됨 (상태 v${item.ctx.stateVersion})');
+      body = _Note('${a.label}을 마쳤어요.');
     } else {
       body = _Note(item.lockReason.isNotEmpty ? item.lockReason : '이전 단계를 마치면 진행할 수 있어요.');
     }
@@ -337,32 +323,6 @@ class _StepCard extends StatelessWidget {
   }
 }
 
-class _StepGrid extends StatelessWidget {
-  const _StepGrid({required this.rows});
-
-  final List<(String, String)> rows;
-
-  @override
-  Widget build(BuildContext context) {
-    return Table(
-      columnWidths: const {0: IntrinsicColumnWidth(), 1: FlexColumnWidth()},
-      children: [
-        for (final (k, v) in rows)
-          TableRow(children: [
-            Padding(
-              padding: const EdgeInsets.only(right: 12, bottom: 6),
-              child: Text(k, style: ts(13, weight: FontWeight.w700, color: AppColors.text3, height: 1.5)),
-            ),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(v, style: ts(13, height: 1.5)),
-            ),
-          ]),
-      ],
-    );
-  }
-}
-
 class _Note extends StatelessWidget {
   const _Note(this.text);
 
@@ -377,81 +337,3 @@ class _Note extends StatelessWidget {
   }
 }
 
-class _PlanMeta extends StatelessWidget {
-  const _PlanMeta({
-    required this.firedRules,
-    required this.policyVersion,
-    required this.stateVersion,
-    required this.checkedAt,
-    required this.visited,
-    required this.cost,
-    required this.caseId,
-  });
-
-  final List<String> firedRules;
-  final String policyVersion;
-  final int stateVersion;
-  final String checkedAt;
-  final int visited;
-  final int? cost;
-  final String caseId;
-
-  @override
-  Widget build(BuildContext context) {
-    WidgetSpan code(String t) => WidgetSpan(
-          alignment: PlaceholderAlignment.middle,
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 1),
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-            decoration: BoxDecoration(color: AppColors.neutralBg, borderRadius: BorderRadius.circular(4)),
-            child: Text(t, style: monoStyle(11)),
-          ),
-        );
-    return CustomPaint(
-      painter: const _DashedBorderPainter(),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Text.rich(
-          TextSpan(children: [
-            const TextSpan(text: '근거 규칙 '),
-            if (firedRules.isEmpty) code('없음'),
-            for (final r in firedRules) ...[code(r), const TextSpan(text: ' ')],
-            const TextSpan(text: '\n정책 '),
-            code(policyVersion),
-            const TextSpan(text: ' 데모용 가상 정책 · 실제 은행 정책 아님\n상태 버전 '),
-            code('v$stateVersion'),
-            TextSpan(text: ' · $checkedAt 조회 · 상태 그래프 $visited개 상태${cost != null ? ' · 최소 비용 경로 $cost' : ''}\n사건 번호 '),
-            code(caseId),
-          ]),
-          style: ts(11.5, color: AppColors.text3, height: 1.7),
-        ),
-      ),
-    );
-  }
-}
-
-class _DashedBorderPainter extends CustomPainter {
-  const _DashedBorderPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rrect = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(12));
-    canvas.drawRRect(rrect, Paint()..color = Colors.white);
-    final path = Path()..addRRect(rrect.deflate(0.5));
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1
-      ..color = AppColors.lineStrong;
-    for (final metric in path.computeMetrics()) {
-      var d = 0.0;
-      while (d < metric.length) {
-        canvas.drawPath(metric.extractPath(d, d + 3), paint);
-        d += 6;
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashedBorderPainter oldDelegate) => false;
-}

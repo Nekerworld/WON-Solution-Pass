@@ -55,7 +55,7 @@
       fact: 'otpRegistered',
       title: '디지털 OTP 등록 필요',
       when: (c) => c.amount > P.otpRequiredAbove && !c.otpRegistered,
-      describe: (c) => fmt(P.otpRequiredAbove) + '를 초과하는 ' + fmt(c.amount) + ' 이체에는 디지털 OTP가 필요합니다. (가상 정책)',
+      describe: (c) => fmt(P.otpRequiredAbove) + '을 초과하는 ' + fmt(c.amount) + ' 이체에는 디지털 OTP가 필요합니다. (가상 정책)',
     },
     {
       id: 'R01',
@@ -63,7 +63,7 @@
       fact: 'limitSufficient',
       title: '이체한도 충족 필요',
       when: (c) => c.amount > c.transferLimit,
-      describe: (c) => '요청 금액 ' + fmt(c.amount) + '이 1일 이체한도 ' + fmt(c.transferLimit) + '를 초과합니다.',
+      describe: (c) => '요청 금액 ' + fmt(c.amount) + '이 1일 이체한도 ' + fmt(c.transferLimit) + '을 초과합니다.',
     },
     {
       id: 'R03',
@@ -73,7 +73,7 @@
       title: '한도 상향 전 디지털 OTP 등록 필요',
       when: (c) => c.amount > c.transferLimit && c.amount > P.maxLimitWithoutOtp,
       relevant: (c, f) => !f.otpRegistered,
-      describe: () => fmt(P.maxLimitWithoutOtp) + '를 초과하는 한도로 변경하려면 디지털 OTP 등록이 먼저 필요합니다. (가상 정책)',
+      describe: () => fmt(P.maxLimitWithoutOtp) + '을 초과하는 한도로 변경하려면 디지털 OTP 등록이 먼저 필요합니다. (가상 정책)',
     },
     {
       id: 'R08',

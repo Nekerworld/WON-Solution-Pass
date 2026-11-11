@@ -97,6 +97,7 @@ abstract final class AppIcons {
   static final back = SvgArt([_p('M15 5l-7 7 7 7')]);
   static final bell = SvgArt([_p('M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15L6 16z'), _p('M10 20a2 2 0 0 0 4 0')]);
   static final menu = SvgArt([_p('M4 7h16M4 12h16M4 17h16')]);
+  static final code = SvgArt([_p('M9 8L4.5 12 9 16'), _p('M15 8l4.5 4-4.5 4'), _p('M13.5 6.5l-3 11')]);
   static final refresh = SvgArt([_p('M20 11a8 8 0 1 0-2.3 5.7'), _p('M20 5v6h-6')]);
   static final send = SvgArt([_p('M4 12l16-8-6 16-2.5-6.5L4 12z')]);
   static final transfer = SvgArt([_p('M4 8h13l-3-3'), _p('M20 16H7l3 3')]);

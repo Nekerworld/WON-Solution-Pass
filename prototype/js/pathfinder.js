@@ -395,7 +395,7 @@
         const needForTransfer = ctx.amount > P.otpRequiredAbove;
         return {
           problem: needForTransfer
-            ? fmt(P.otpRequiredAbove) + '를 넘는 이체에는 디지털 OTP가 필요해요.'
+            ? fmt(P.otpRequiredAbove) + '을 넘는 이체에는 디지털 OTP가 필요해요.'
             : '한도를 올리려면 디지털 OTP가 먼저 필요해요.',
           current: ctx.otpRegistered ? '등록됨' : '미등록',
           action: '디지털 OTP 등록 화면에서 이 기기를 등록해요.',
