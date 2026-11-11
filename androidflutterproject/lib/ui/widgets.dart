@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../app/overlays.dart';
 import '../domain/bank_types.dart';
 import 'icons.dart';
+import 'responsive.dart';
 import 'theme.dart';
 
 /* ==================================================================
@@ -36,6 +37,7 @@ class ScreenFrame extends StatelessWidget {
   Widget build(BuildContext context) {
     final bg = white ? AppColors.surface : AppColors.bg;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final side = wideInsetOf(context);
     return Material(
       color: bg,
       child: SafeArea(
@@ -48,14 +50,18 @@ class ScreenFrame extends StatelessWidget {
                 color: bodyColor ?? bg,
                 child: ListView(
                   controller: scrollController,
-                  padding: bodyPadding.copyWith(bottom: bodyPadding.bottom + (footer == null ? bottomInset : 0)),
+                  padding: bodyPadding.copyWith(
+                    left: bodyPadding.left + side,
+                    right: bodyPadding.right + side,
+                    bottom: bodyPadding.bottom + (footer == null ? bottomInset : 0),
+                  ),
                   children: children,
                 ),
               ),
             ),
             if (footer != null)
               Container(
-                padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + (bottomInset > 0 ? bottomInset : 10)),
+                padding: EdgeInsets.fromLTRB(20 + side, 12, 20 + side, 16 + (bottomInset > 0 ? bottomInset : 10)),
                 color: bg,
                 child: footer,
               ),

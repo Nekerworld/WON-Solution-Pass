@@ -12,6 +12,7 @@ import 'demo/demo_screen.dart';
 import 'domain/event_log.dart';
 import 'domain/pathfinder.dart';
 import 'ui/app_scope.dart';
+import 'ui/responsive.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
 
@@ -95,6 +96,7 @@ class _DemoModal extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final padding = MediaQuery.paddingOf(context);
+    final side = 12 + wideInset(MediaQuery.sizeOf(context).width, 744);
     return Stack(
       children: [
         Positioned.fill(
@@ -107,8 +109,8 @@ class _DemoModal extends StatelessWidget {
           ),
         ),
         Positioned(
-          left: 12,
-          right: 12,
+          left: side,
+          right: side,
           top: padding.top + 28,
           bottom: padding.bottom + 12,
           child: MediaQuery.removePadding(
@@ -127,6 +129,7 @@ class _DemoModal extends StatelessWidget {
 }
 
 /// 넓은 화면(웹·데스크톱)에서는 휴대폰 크기 프레임 안에 그린다.
+/// 태블릿 기기에서는 프레임 없이 전체 화면을 쓰고, 각 화면이 본문 폭을 제한한다.
 class _PhoneFrame extends StatelessWidget {
   const _PhoneFrame({required this.child});
 
@@ -135,7 +138,7 @@ class _PhoneFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
-    if (mq.size.width <= 600) return child;
+    if (mq.size.width <= 600 || isMobileOS) return child;
     final height = math.min(844.0, mq.size.height - 40);
     final width = height * 390 / 844;
     return ColoredBox(

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -9,6 +10,7 @@ import '../../domain/formatters.dart';
 import '../../domain/fsm.dart';
 import '../app_scope.dart';
 import '../icons.dart';
+import '../responsive.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
@@ -40,6 +42,7 @@ class HomeScreen extends StatelessWidget {
     final hasCase = resume != null;
     final hideBal = s.hideBalance;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final side = wideInsetOf(context);
 
     final notices = <_NoticeData>[
       if (hasCase) _NoticeData(isCase: true, title: resume.$1, desc: resume.$2, onTap: app.openPass),
@@ -72,7 +75,7 @@ class HomeScreen extends StatelessWidget {
               child: CustomPaint(
                 painter: const _HomeBandPainter(),
                 child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 2, 16, 24),
+                  padding: EdgeInsets.fromLTRB(16 + side, 2, 16 + side, 24),
                   children: [
                     if (notices.isNotEmpty) ...[
                       const SizedBox(height: 6),
@@ -167,9 +170,10 @@ class _HomeTop extends StatelessWidget {
           ),
         );
 
+    final side = wideInsetOf(context);
     return Container(
       color: AppColors.bg,
-      padding: const EdgeInsets.fromLTRB(20, 6, 8, 6),
+      padding: EdgeInsets.fromLTRB(20 + side, 6, 8 + side, 6),
       child: Row(
         children: [
           Container(
@@ -390,7 +394,10 @@ class _HomeHero extends StatelessWidget {
     return Column(
       children: [
         LayoutBuilder(
-          builder: (context, c) => SvgIcon(AppIcons.homeArt, width: c.maxWidth, height: c.maxWidth / 3, size: c.maxWidth),
+          builder: (context, c) {
+            final w = math.min(c.maxWidth, 450.0);
+            return SvgIcon(AppIcons.homeArt, width: w, height: w / 3, size: w);
+          },
         ),
         Transform.translate(
           offset: const Offset(0, -4),
@@ -836,14 +843,16 @@ class _BottomNav extends StatelessWidget {
     return Container(
       padding: EdgeInsets.fromLTRB(4, 6, 4, bottomInset > 0 ? bottomInset : 10),
       color: AppColors.bottomNavBg,
-      child: Row(
-        children: [
-          item(AppIcons.bag, '상품'),
-          item(AppIcons.pie, '자산·소비'),
-          item(AppIcons.homeFill, '홈', active: true, onTap: onHome),
-          item(AppIcons.stockBox, '주식'),
-          item(AppIcons.gift, '혜택'),
-        ],
+      child: MaxWidth(
+        child: Row(
+          children: [
+            item(AppIcons.bag, '상품'),
+            item(AppIcons.pie, '자산·소비'),
+            item(AppIcons.homeFill, '홈', active: true, onTap: onHome),
+            item(AppIcons.stockBox, '주식'),
+            item(AppIcons.gift, '혜택'),
+          ],
+        ),
       ),
     );
   }

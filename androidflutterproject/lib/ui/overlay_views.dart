@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app/case_controller.dart';
 import '../app/overlays.dart';
 import '../domain/formatters.dart';
+import 'responsive.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -72,7 +73,7 @@ class _SheetLayerState extends State<SheetLayer> with SingleTickerProviderStateM
           child: SlideTransition(
             position: Tween(begin: const Offset(0, 1.05), end: Offset.zero).animate(curved),
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.88),
+              constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.88, maxWidth: kSheetMaxWidth),
               child: Container(
                 width: double.infinity,
                 decoration: const BoxDecoration(
@@ -291,6 +292,7 @@ class _ModalLayerState extends State<ModalLayer> with SingleTickerProviderStateM
               builder: (context, child) => Transform.translate(offset: Offset(0, 40 * (1 - curved.value)), child: child),
               child: Container(
                 width: double.infinity,
+                constraints: const BoxConstraints(maxWidth: kSheetMaxWidth),
                 padding: EdgeInsets.fromLTRB(22, 24, 22, 24 + bottomInset),
                 decoration: const BoxDecoration(
                   color: Colors.white,

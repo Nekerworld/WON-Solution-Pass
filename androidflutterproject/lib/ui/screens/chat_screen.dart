@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../app/chatbot_service.dart';
@@ -7,6 +9,7 @@ import '../../app/session.dart';
 import '../../domain/formatters.dart';
 import '../app_scope.dart';
 import '../icons.dart';
+import '../responsive.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
@@ -113,6 +116,9 @@ class _ChatScreenState extends State<ChatScreen> {
     final date = '${now.year}.${pad2(now.month)}.${pad2(now.day)}';
     final time = '${pad2(now.hour)}:${pad2(now.minute)}:${pad2(now.second)}';
     final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final screenW = MediaQuery.sizeOf(context).width;
+    final side = wideInset(screenW);
+    void onCard(_ChatCard c) => c.q == null ? app.startDiagnosis('MANUAL') : _send(c.q);
 
     return Material(
       color: Colors.white,
@@ -124,14 +130,16 @@ class _ChatScreenState extends State<ChatScreen> {
             Container(
               height: 46,
               color: Colors.white,
-              child: Row(
-                children: [
-                  _ToolButton(icon: AppIcons.talk, label: '톡상담', onTap: () => app.goSupport()),
-                  const _ToolDivider(),
-                  _ToolButton(icon: AppIcons.eyeOff, label: '상담숨기기', onTap: app.noop),
-                  const _ToolDivider(),
-                  _ToolButton(icon: AppIcons.refresh, label: '처음으로', onTap: app.chatReset),
-                ],
+              child: MaxWidth(
+                child: Row(
+                  children: [
+                    _ToolButton(icon: AppIcons.talk, label: '톡상담', onTap: () => app.goSupport()),
+                    const _ToolDivider(),
+                    _ToolButton(icon: AppIcons.eyeOff, label: '상담숨기기', onTap: app.noop),
+                    const _ToolDivider(),
+                    _ToolButton(icon: AppIcons.refresh, label: '처음으로', onTap: app.chatReset),
+                  ],
+                ),
               ),
             ),
             Expanded(
@@ -139,7 +147,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 color: AppColors.chatBg,
                 child: ListView(
                   controller: _scroll,
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                  padding: EdgeInsets.fromLTRB(20 + side, 16, 20 + side, 24),
                   children: [
                     _DayDivider(date),
                     const SizedBox(height: 14),
@@ -178,11 +186,11 @@ class _ChatScreenState extends State<ChatScreen> {
                     SizedBox(
                       height: 36,
                       child: OverflowBox(
-                        minWidth: MediaQuery.sizeOf(context).width,
-                        maxWidth: MediaQuery.sizeOf(context).width,
+                        minWidth: screenW,
+                        maxWidth: screenW,
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          padding: EdgeInsets.symmetric(horizontal: 20 + side),
                           itemCount: _chatChips.length,
                           separatorBuilder: (_, _) => const SizedBox(width: 8),
                           itemBuilder: (context, i) {
@@ -204,28 +212,44 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                     ),
                     const SizedBox(height: 18),
-                    SizedBox(
-                      height: 252,
-                      child: OverflowBox(
-                        minWidth: MediaQuery.sizeOf(context).width,
-                        maxWidth: MediaQuery.sizeOf(context).width,
-                        child: Carousel(
-                          height: 236,
-                          viewportFraction: 0.82,
-                          padEnds: false,
-                          children: [
-                            for (var i = 0; i < _chatCards.length; i++)
-                              Padding(
-                                padding: EdgeInsets.fromLTRB(i == 0 ? 20 : 6, 0, i == _chatCards.length - 1 ? 20 : 6, 0),
-                                child: _ChatCardView(
-                                  card: _chatCards[i],
-                                  onTap: _chatCards[i].q == null ? () => app.startDiagnosis('MANUAL') : () => _send(_chatCards[i].q),
+                    if (side > 0)
+                      SizedBox(
+                        height: 236,
+                        child: OverflowBox(
+                          minWidth: screenW,
+                          maxWidth: screenW,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            padding: EdgeInsets.symmetric(horizontal: 20 + side),
+                            itemCount: _chatCards.length,
+                            separatorBuilder: (_, _) => const SizedBox(width: 12),
+                            itemBuilder: (context, i) => SizedBox(
+                              width: 310,
+                              child: _ChatCardView(card: _chatCards[i], onTap: () => onCard(_chatCards[i])),
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      SizedBox(
+                        height: 252,
+                        child: OverflowBox(
+                          minWidth: screenW,
+                          maxWidth: screenW,
+                          child: Carousel(
+                            height: 236,
+                            viewportFraction: 0.82,
+                            padEnds: false,
+                            children: [
+                              for (var i = 0; i < _chatCards.length; i++)
+                                Padding(
+                                  padding: EdgeInsets.fromLTRB(i == 0 ? 20 : 6, 0, i == _chatCards.length - 1 ? 20 : 6, 0),
+                                  child: _ChatCardView(card: _chatCards[i], onTap: () => onCard(_chatCards[i])),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(0, 10, 0, 14),
                       child: Text(time, style: ts(12, color: AppColors.text3)),
@@ -247,7 +271,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             Container(
-              padding: EdgeInsets.fromLTRB(8, 10, 20, bottomInset > 0 ? bottomInset + 4 : 14),
+              padding: EdgeInsets.fromLTRB(8 + side, 10, 20 + side, bottomInset > 0 ? bottomInset + 4 : 14),
               color: Colors.white,
               child: Row(
                 children: [
@@ -444,7 +468,7 @@ class _Message extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final maxW = (MediaQuery.sizeOf(context).width - 36) * 0.88;
+    final maxW = (math.min(MediaQuery.sizeOf(context).width, kContentMaxWidth) - 40) * 0.88;
     if (m.isUser) {
       return Align(
         alignment: Alignment.centerRight,
