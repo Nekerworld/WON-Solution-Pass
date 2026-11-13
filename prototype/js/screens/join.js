@@ -74,7 +74,9 @@
       met +
       '/' +
       total +
-      '</strong></div><div class="ck__bar"><i style="width:' +
+      '</strong><span class="ck__product">' +
+      esc(SC.getProduct(j.productId).name) +
+      '</span></div><div class="ck__bar"><i style="width:' +
       Math.round((met / total) * 100) +
       '%"></i></div><ul>' +
       rows +
@@ -190,15 +192,15 @@
       const st = jf().state;
       const p = SC.getProduct(j.productId);
       const canTalk = TALK_STATES.indexOf(st) !== -1 && !j.thinking;
-      const right = jf().can('EXIT') ? '<button class="appbar__text" data-action="join-exit">그만하기</button>' : '<span></span>';
       const chips = canTalk
         ? '<div class="quick">' +
           ['상담 연결해 주세요', '완료했다고 떴는데 다시 하래요', '그만할래요'].map((q) => '<button class="quick__chip" data-action="join-send" data-q="' + esc(q) + '">' + esc(q) + '</button>').join('') +
           '</div>'
         : '';
       return (
-        UI.appbar(p.name + ' 가입', { right: right }) +
-        '<div class="screen-body join-body" id="join-body">' +
+        UI.chatHeader(jf().can('EXIT') ? { action: 'join-exit', label: '그만하기' } : null) +
+        '<div class="screen-body join-body chat-body" id="join-body">' +
+        UI.chatIntro('AI 가입 지원', j.chat[0] && j.chat[0].at) +
         checklist(j) +
         '<div class="chat-log">' +
         UI.chatLog(j.chat, j.thinking) +

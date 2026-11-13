@@ -147,11 +147,11 @@
       if (!a) return UI.appbar('AI 자산관리 상담') + '<div class="screen-body"><p class="lead">진행 중인 상담이 없어요.</p><button class="btn btn--primary" data-action="asset-start">상담 시작</button></div>';
       const st = af().state;
       const canTalk = TALK.indexOf(st) !== -1 && !a.thinking;
-      const right = af().can('END') || af().can('EXIT') ? '<button class="appbar__text" data-action="asset-end">분석 종료</button>' : '<span></span>';
       const ph = { GOAL: '목표를 말씀해 주세요', ASKING: '편하게 답해 주세요 (예: 3천만원 정도)', REVIEW: '바꿀 조건을 입력해 주세요' }[st] || '지금은 위 버튼으로 진행해 주세요';
       return (
-        UI.appbar('AI 자산관리 상담', { right: right }) +
-        '<div class="screen-body asset-body" id="asset-body">' +
+        UI.chatHeader(af().can('END') || af().can('EXIT') ? { action: 'asset-end', label: '분석 종료' } : null) +
+        '<div class="screen-body asset-body chat-body" id="asset-body">' +
+        UI.chatIntro('AI 자산관리 상담', a.chat[0] && a.chat[0].at) +
         '<div class="chat-log">' +
         UI.chatLog(a.chat, a.thinking) +
         '</div>' +

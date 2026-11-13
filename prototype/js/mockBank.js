@@ -77,6 +77,7 @@
         customerName: s.customer.name,
         hasDepositAccount: s.facts.hasDepositAccount,
         account: s.facts.hasDepositAccount ? { name: 'WON 통장', number: '1002-***-731024' } : null,
+        fxAccount: s.facts.hasFxAccount ? { name: 'WON 외화통장(USD)', number: '1002-***-552190' } : null,
         savings: apps.filter((a) => a.status === 'SUCCESS').map((a) => ({ productId: a.productId, id: a.id, terms: a.terms })),
         stateVersion: s.system.stateVersion,
       });

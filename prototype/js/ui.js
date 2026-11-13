@@ -63,6 +63,12 @@
     target: svg('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>'),
     doc: svg('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>'),
     globe: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.7 5.6 3.7 9s-1.2 6.4-3.7 9c-2.5-2.6-3.7-5.6-3.7-9S9.5 5.6 12 3z"/>'),
+    copy: svg('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>'),
+    cart: svg('<path d="M3 4h2l2.2 10.5a1 1 0 0 0 1 .8h9.4a1 1 0 0 0 1-.8L20 8H6.2"/><circle cx="9" cy="19.5" r="1.3"/><circle cx="17" cy="19.5" r="1.3"/>'),
+    heart: svg('<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/>'),
+    down: svg('<path d="M6 9l6 6 6-6"/>'),
+    msg: svg('<path d="M4 5h16v11H9l-5 4z"/>'),
+    eye: svg('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
     route: svg('<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/>'),
     homeFill:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.6L12 3.5l8.5 7.1V20a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z" fill="currentColor"/></svg>',
@@ -140,20 +146,32 @@
     );
   }
 
+  const pad2 = (n) => String(n).padStart(2, '0');
+  function clock(at) {
+    if (!at) return '';
+    const d = new Date(at);
+    return '<time class="msg__time">' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()) + '</time>';
+  }
+
+  /** 챗봇 아바타: 우리은행 캐릭터 대신 단순한 말풍선 얼굴 */
+  const BOT_FACE =
+    '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="9" width="22" height="17" rx="8" fill="#e8f1fe"/><rect x="5" y="9" width="22" height="17" rx="8" fill="none" stroke="#2488f3" stroke-width="1.6"/><circle cx="12.5" cy="17.5" r="1.8" fill="#2488f3"/><circle cx="19.5" cy="17.5" r="1.8" fill="#2488f3"/><path d="M16 9V5.5" stroke="#2488f3" stroke-width="1.6" stroke-linecap="round"/><circle cx="16" cy="4.5" r="1.6" fill="#2488f3"/></svg>';
+
   function renderMessage(m) {
-    if (m.role === 'user') return '<div class="msg msg--user"><div class="msg__bubble">' + esc(m.text) + '</div></div>';
+    if (m.role === 'user') return '<div class="msg msg--user"><div class="msg__say">"' + esc(m.text) + '"</div>' + clock(m.at) + '</div>';
     if (m.role === 'system') return '<div class="msg-sys' + (m.tone ? ' is-' + m.tone : '') + '">' + (m.tone === 'warning' ? I.alert : I.info) + '<span>' + esc(m.text) + '</span></div>';
     return (
-      '<div class="msg msg--bot"><div class="bot-label">' +
-      I.spark.replace('<svg', '<svg width="13" height="13"') +
-      'AI 도우미' +
-      '</div><div class="msg__bubble' +
+      '<div class="msg msg--bot"><span class="msg__avatar">' +
+      BOT_FACE +
+      '</span><div class="msg__card' +
       (m.tone === 'warning' ? ' is-warning' : '') +
-      '">' +
+      '"><div class="msg__text">' +
       esc(m.text).replace(/\n/g, '<br>') +
       '</div>' +
       figures(m.figures) +
       (m.why ? '<div class="msg__why">' + I.question.replace('<svg', '<svg width="13" height="13"') + esc(m.why) + '</div>' : '') +
+      '</div>' +
+      clock(m.at) +
       '</div>'
     );
   }
@@ -161,7 +179,75 @@
   function chatLog(messages, thinking) {
     return (
       (messages || []).map(renderMessage).join('') +
-      (thinking ? '<div class="thinking" aria-label="AI가 생각하는 중"><span class="thinking__dots"><i></i><i></i><i></i></span>AI가 확인하고 있어요</div>' : '')
+      (thinking ? '<div class="thinking" aria-label="AI가 생각하는 중"><span class="msg__avatar">' + BOT_FACE + '</span><span class="thinking__dots"><i></i><i></i><i></i></span>AI가 확인하고 있어요</div>' : '')
+    );
+  }
+
+  /**
+   * 우리WON뱅킹 AI챗봇 화면 머리: 제목, AI 배지, 보조 도구 줄.
+   * exit: { action, label } 이 있으면 세 번째 도구 자리에 둔다 (없으면 '처음으로', 동작 없음)
+   */
+  function chatHeader(exit) {
+    return (
+      '<header class="appbar chat-head"><button class="icon-btn" data-action="back" aria-label="뒤로 가기">' +
+      I.back +
+      '</button><div class="appbar__title">AI챗봇과 대화중</div><span class="chat-head__ai" aria-hidden="true">AI<small>챗봇</small></span></header>' +
+      '<div class="chat-tools"><button data-action="noop">' +
+      I.msg +
+      '톡상담</button><button data-action="noop">' +
+      I.eyeOff +
+      '상담숨기기</button>' +
+      (exit ? '<button data-action="' + exit.action + '">' + I.refresh + esc(exit.label) + '</button>' : '<button data-action="noop">' + I.refresh + '처음으로</button>') +
+      '</div>'
+    );
+  }
+
+  /** 대화 시작 머리말: 날짜, 연결 안내, 인사 */
+  function chatIntro(service, startedAt) {
+    const d = new Date(startedAt || Date.now());
+    const name = WSP.store.getState().customer.name;
+    return (
+      '<div class="chat-intro"><span class="chat-intro__date">' +
+      d.getFullYear() +
+      '.' +
+      pad2(d.getMonth() + 1) +
+      '.' +
+      pad2(d.getDate()) +
+      '</span><span class="chat-intro__conn">' +
+      esc(service) +
+      '이 연결되었습니다.</span><div class="chat-intro__hello"><span class="msg__avatar">' +
+      BOT_FACE +
+      '</span><h2>' +
+      esc(name) +
+      ' 고객님, 안녕하세요.<br>우리은행 AI챗봇입니다.</h2></div></div>'
+    );
+  }
+
+  /** 우리WON뱅킹 하단 탭. 해결패스 기능이 없는 탭은 눌러도 아무 일이 없다. */
+  const NAV = [
+    ['products', 'go-products', I.product, '상품'],
+    ['asset', 'asset-start', I.pie, '자산·소비'],
+    ['home', 'go-home', I.homeFill, '홈'],
+    ['stock', 'noop', I.stock, '주식'],
+    ['benefit', 'noop', I.gift, '혜택'],
+  ];
+  function bottomNav(active) {
+    return (
+      '<nav class="bottom-nav">' +
+      NAV.map(
+        (n) =>
+          '<button class="bottom-nav__item' +
+          (n[0] === active ? ' is-active' : '') +
+          (n[0] === 'home' ? ' is-home' : '') +
+          '" data-action="' +
+          n[1] +
+          '"><span class="bottom-nav__icon">' +
+          n[2] +
+          '</span>' +
+          n[3] +
+          '</button>'
+      ).join('') +
+      '</nav>'
     );
   }
 
@@ -181,7 +267,9 @@
 
   function chatInput(id, action, placeholder, disabled) {
     return (
-      '<div class="chat-input"><div class="chat-input__field"><input id="' +
+      '<div class="chat-input"><button class="chat-input__plus" data-action="noop" aria-label="더보기">' +
+      I.plus +
+      '</button><div class="chat-input__field"><input id="' +
       id +
       '" data-enter="' +
       action +
@@ -202,7 +290,7 @@
   /* ==================================================================
    * 화면 등록 / 라우터
    * ================================================================== */
-  const SCREEN_IDS = Object.freeze(['home', 'products', 'product', 'menu', 'join-consent', 'join', 'apply', 'apply-result', 'support', 'direct', 'asset-consent', 'asset', 'explore']);
+  const SCREEN_IDS = Object.freeze(['home', 'products', 'product-list', 'product', 'menu', 'join-consent', 'join', 'apply', 'apply-result', 'support', 'direct', 'asset-consent', 'asset', 'explore']);
   const SCREENS = {};
 
   function registerScreen(id, def) {
@@ -675,6 +763,9 @@
     condBadge: condBadge,
     queryErrorCard: queryErrorCard,
     chatLog: chatLog,
+    chatHeader: chatHeader,
+    chatIntro: chatIntro,
+    bottomNav: bottomNav,
     scrollToLatest: scrollToLatest,
     chatInput: chatInput,
     registerScreen: registerScreen,
