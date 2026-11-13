@@ -50,9 +50,33 @@
     a.chat.push(Object.assign({ id: a.chat.length + 1, at: Date.now() }, msg));
     if (a.chat.length > 80) a.chat.shift();
   }
-  const sayAI = (res, extra) => push(Object.assign({ role: 'ai', text: res.output.message, fallback: res.fallback }, extra || {}));
+
+  // 메시지가 한꺼번에 쌓이면 고객이 스크롤을 올려 다시 읽어야 하므로, 이어지는 안내 사이에 최소 간격을 둔다 (시연 패널 속도 배율 적용)
+  const GAP_MS = 3000;
+  let lastSaidAt = 0;
+  let pacing = 0;
+
+  /** @returns {Promise<boolean>} 기다리는 동안 데모가 초기화됐으면 false */
+  async function say(msg) {
+    const ep = A().epoch();
+    const wait = lastSaidAt + GAP_MS * bank.getLatencyScale() - Date.now();
+    if (wait > 0) {
+      pacing += 1;
+      think(true);
+      await WSP.utils.sleep(wait);
+      pacing -= 1;
+      if (stale(ep)) return false;
+    }
+    S().thinking = false;
+    push(msg);
+    lastSaidAt = Date.now();
+    A().refresh(SCREENS);
+    return true;
+  }
+  const sayAI = (res, extra) => say(Object.assign({ role: 'ai', text: res.output.message, fallback: res.fallback }, extra || {}));
+  const sayBot = (text, extra) => say(Object.assign({ role: 'ai', text: text }, extra || {}));
+  const saySystem = (text, tone) => say({ role: 'system', text: text, tone: tone || null });
   const sayUser = (text) => push({ role: 'user', text: text });
-  const saySystem = (text, tone) => push({ role: 'system', text: text, tone: tone || null });
 
   function think(on) {
     const a = S();
@@ -77,7 +101,8 @@
   function agree() {
     if (fsm().state !== 'CONSENT') return;
     fsm().transition('AGREE');
-    push({ role: 'ai', text: '어떤 목표로 상담받고 싶으세요? 생활 언어로 편하게 말씀해 주세요. 예: "2년 뒤 결혼 자금 모으고 싶어요"' });
+    push({ role: 'ai', text: '어떤 목표로 상담받고 싶으세요? 편하게 말씀해 주세요. 예: "2년 뒤 결혼 자금 모으고 싶어요"' });
+    lastSaidAt = Date.now();
     UI().navigate('asset', {}, { replace: true });
   }
 
@@ -90,11 +115,10 @@
     think(true);
     const ai = await AI.asset.goal(t);
     if (stale(ep)) return;
-    think(false);
     a.goalText = t;
     a.purpose = ai.valid && ai.output.purpose ? ai.output.purpose : 'GOAL_SAVING';
     ai.output.actions.filter((x) => x.type === 'SET_INFO').forEach((x) => (a.stated[x.key] = x.value));
-    sayAI(ai);
+    if (!(await sayAI(ai))) return;
     fsm().transition('GOAL_SET', { purpose: a.purpose });
     await advance();
   }
@@ -139,19 +163,16 @@
       if (stale(ep)) return;
       think(false);
       if (!r.ok) {
-        a.hold = { reason: 'QUERY_FAILED', text: '연결된 기관의 정보를 불러오지 못했어요. 확인되지 않은 정보로 분석하지 않아요.' };
-        saySystem(a.hold.text + ' (' + r.error.message + ')', 'warning');
+        a.hold = { reason: 'QUERY_FAILED', text: '연결된 기관의 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.' };
+        WSP.events.add('ASSET', '재무 정보 조회 실패: ' + r.error.code, 'warn');
+        if (!(await saySystem(a.hold.text, 'warning'))) return;
         f.transition('QUERY_FAILED', { code: r.error.code });
         return;
       }
       collect(r.data);
       f.transition('COLLECTED', { stateVersion: r.data.stateVersion });
     } else if (st === 'TAGGING') {
-      think(true);
-      const ai = await AI.asset.tag(a.info, a.coverage);
-      if (stale(ep)) return;
-      think(false);
-      sayAI(ai, { kind: 'sources' });
+      WSP.events.add('ASSET', '출처 구분: ' + Object.keys(a.info.items).map((k) => k + ':' + a.info.items[k].source).join(', '));
       f.transition('TAGGED');
     } else if (st === 'CALCULATING' || st === 'RECALC_ANSWER' || st === 'RECALC_CHANGE') {
       a.metrics = AA.computeMetrics(a.info);
@@ -161,8 +182,7 @@
       think(true);
       const ai = await AI.asset.interpret(a.metrics);
       if (stale(ep)) return;
-      think(false);
-      sayAI(ai, { kind: 'interpret' });
+      if (!(await sayAI(ai, { kind: 'interpret', figures: AA.interpretFigures(a.metrics, a.purpose) }))) return;
       f.transition('INTERPRETED');
     } else if (st === 'GAP_CHECK') {
       a.gaps = AA.findGaps(a.info, a.purpose, a.metrics);
@@ -173,10 +193,9 @@
         think(true);
         const ai = await AI.asset.ask(q, gap);
         if (stale(ep)) return;
-        think(false);
+        if (!(await sayAI(ai, { kind: 'question', key: q.key, why: q.why, level: gap.level }))) return;
         a.pendingQuestion = q.key;
         a.questionsAsked += 1;
-        sayAI(ai, { kind: 'question', key: q.key, why: q.why, level: gap.level });
         f.transition('ASK', { question: q.id, level: gap.level });
         return;
       }
@@ -190,7 +209,7 @@
         missing: p.missing,
         text: '지금 정보로는 제안하기 어려워요. ' + WSP.utils.josa(p.missing.map((k) => AA.ITEMS[k].label).join('·'), '이') + ' 확인되지 않았어요.',
       };
-      saySystem(a.hold.text, 'warning');
+      if (!(await saySystem(a.hold.text, 'warning'))) return;
       f.transition('NOT_PROPOSABLE', { missing: p.missing });
     } else if (st === 'PROPOSED_FULL' || st === 'PROPOSED_LIMITED') {
       const level = st === 'PROPOSED_FULL' ? 'FULL' : 'LIMITED';
@@ -198,9 +217,8 @@
       think(true);
       const ai = await AI.asset.propose(basis, level, a.metrics);
       if (stale(ep)) return;
-      think(false);
+      if (!(await sayAI(ai, { kind: 'proposal', figures: AA.proposalFigures(basis, a.metrics) }))) return;
       a.proposal = { level: level, basis: basis, text: ai.output.message, at: Date.now() };
-      sayAI(ai, { kind: 'proposal' });
       f.transition('SHOWN', { level: level });
     }
   }
@@ -233,8 +251,8 @@
     if (st === 'REVIEW') return modifyText(t);
     if (st !== 'ASKING') {
       sayUser(t);
-      push({ role: 'ai', text: '지금 단계에서는 아래 버튼으로 선택해 주세요.' });
-      return A().refresh(SCREENS);
+      await sayBot('지금 단계에서는 아래 버튼으로 선택해 주세요.');
+      return;
     }
     sayUser(t);
     const ep = A().epoch();
@@ -242,8 +260,8 @@
     think(true);
     const ai = await AI.asset.answer(t, q);
     if (stale(ep) || fsm().state !== 'ASKING') return;
-    think(false);
-    sayAI(ai);
+    if (ai.output.intent === 'SET_INFO') a.thinking = false;
+    else if (!(await sayAI(ai))) return;
     await applyAnswer(ai.output, q);
   }
 
@@ -255,7 +273,7 @@
     if (types.indexOf('STOP_QUESTIONS') !== -1 || types.indexOf('ESCALATE') !== -1) {
       a.stopRequested = true;
       a.pendingQuestion = null;
-      if (types.indexOf('ESCALATE') !== -1) push({ role: 'ai', text: '지금까지 확인한 내용으로 정리한 뒤 상담 연결을 도와드릴게요.' });
+      if (types.indexOf('ESCALATE') !== -1 && !(await sayBot('지금까지 확인한 내용으로 정리한 뒤 상담 연결을 도와드릴게요.'))) return;
       f.transition('STOP_REQUEST');
       return advance();
     }
@@ -280,20 +298,20 @@
     if (!a || fsm().state !== 'ASKING') return;
     const q = AA.QUESTIONS[a.pendingQuestion];
     sayUser(label);
+    const R = AI.REPLY;
     if (value === 'UNKNOWN' || value === 'REFUSED') {
-      push({ role: 'ai', text: value === 'UNKNOWN' ? '괜찮아요. 모르는 정보는 미확인으로 두고 진행할게요.' : '알겠어요. 답하지 않으신 정보는 미확인으로 두고 진행할게요.' });
+      if (!(await sayBot(value === 'UNKNOWN' ? R.UNKNOWN : R.REFUSED))) return;
       return applyAnswer({ actions: [{ type: 'HOLD', reason: value }] }, q);
     }
     if (value === 'STOP') {
-      push({ role: 'ai', text: '질문은 그만할게요. 지금까지 확인한 정보로 판단해 볼게요.' });
+      if (!(await sayBot(R.STOP))) return;
       return applyAnswer({ actions: [{ type: 'STOP_QUESTIONS' }] }, q);
     }
-    push({ role: 'ai', text: WSP.utils.josa(AA.ITEMS[q.key].label, '을') + ' ' + WSP.utils.josa(AA.display(q.key, Number(value)), '로') + ' 반영했어요.' });
     return applyAnswer({ actions: [{ type: 'SET_INFO', key: q.key, value: Number(value) }] }, q);
   }
 
   /* ---------------- 검토 ---------------- */
-  function accept() {
+  async function accept() {
     const a = S();
     if (fsm().state !== 'REVIEW') return;
     sayUser('이 방향으로 할게요');
@@ -304,9 +322,8 @@
       months: a.proposal.basis.months,
       goalText: a.goalText,
     };
-    push({ role: 'ai', text: '방향을 정했어요. 방향을 고른 것만으로 상품에 가입되지는 않아요. 다음에 할 일을 골라 주세요.' });
     fsm().transition('ACCEPT');
-    A().refresh(SCREENS);
+    await sayBot('좋아요. 다음에 할 일을 골라 주세요.');
   }
 
   async function modifyText(text) {
@@ -317,8 +334,7 @@
     think(true);
     const ai = await AI.asset.modify(text);
     if (stale(ep) || fsm().state !== 'REVIEW') return;
-    think(false);
-    sayAI(ai);
+    if (!(await sayAI(ai))) return;
     const sets = ai.output.actions.filter((x) => x.type === 'SET_INFO');
     if (!sets.length) return A().refresh(SCREENS);
     sets.forEach((x) => AA.setItem(a.info, x.key, x.value, 'STATED', '조건 수정: ' + text));
@@ -334,8 +350,8 @@
     sayUser(alt.label);
     const keys = Object.keys(alt.apply);
     if (!keys.length) {
-      push({ role: 'ai', text: '비상자금을 먼저 채우는 방향은 상담사와 함께 구체적으로 정하는 걸 권해요. 다음 행동에서 상담 연결을 고를 수 있어요.' });
-      return A().refresh(SCREENS);
+      await sayBot('비상자금을 먼저 채우는 방향은 상담사와 함께 구체적으로 정하는 걸 권해요. 이 방향으로 정한 뒤 상담 연결을 고를 수 있어요.');
+      return;
     }
     keys.forEach((k) => AA.setItem(a.info, k, alt.apply[k], 'STATED', '조정안 선택: ' + alt.label));
     fsm().transition('MODIFY', { alternative: id });
@@ -358,11 +374,11 @@
       UI().navigate('support', { track: 'asset' });
     } else if (kind === 'keep' && f.state === 'NEXT_ACTION') {
       a.closedReason = 'KEEP';
-      push({ role: 'ai', text: '지금은 유지하기로 했어요. 상담 내용은 언제든 다시 볼 수 있어요.' });
       f.transition('KEEP');
+      sayBot('지금은 유지하기로 했어요. 상담 내용은 언제든 다시 볼 수 있어요.');
     } else if (kind === 'recheck' && (f.state === 'NEXT_ACTION' || f.state === 'HOLD')) {
-      push({ role: 'ai', text: '현재 정보를 확인하고 틀린 값이 있으면 고쳐 주세요. 고친 값은 출처가 "고객 답변"으로 바뀌고 이력이 남아요.' });
       f.transition('RECHECK_INFO');
+      sayBot('틀린 정보가 있으면 아래에서 고쳐 주세요. 다 고치셨으면 "다시 분석"을 눌러 주세요.');
     }
     A().refresh(SCREENS);
   }
@@ -421,8 +437,8 @@
       if (a) a.closedReason = 'EXIT';
       f.transition('EXIT');
     } else return;
-    if (a) push({ role: 'ai', text: '상담을 마쳤어요. 상품 가입이나 이체 같은 변경은 하지 않았어요.' });
     A().refresh(SCREENS);
+    if (a) sayBot('상담을 마쳤어요. 상품 가입이나 이체 같은 변경은 하지 않았어요.');
   }
 
   async function exit() {
@@ -438,7 +454,13 @@
   }
 
   function resume() {
-    if (S() && AUTO.indexOf(fsm().state) !== -1 && !running) advance();
+    const a = S();
+    if (!a || running) return;
+    if (AUTO.indexOf(fsm().state) !== -1) advance();
+    else if (a.thinking && !pacing) {
+      a.thinking = false;
+      A().refresh(SCREENS);
+    }
   }
 
   function handoffContext() {
@@ -511,7 +533,7 @@
       return A().guard('asset-send', () => answerChip(d.value, d.label));
     },
     'asset-accept'() {
-      accept();
+      return A().guard('asset-accept', accept);
     },
     'asset-alt'(d) {
       return A().guard('asset-alt', () => applyAlternative(d.alt));
@@ -531,10 +553,8 @@
       const sh = UI().openSheet(
         '<h3 class="sheet__title">' +
           UI().esc(AA.ITEMS[key].label) +
-          ' 고치기</h3><p class="sheet__desc">현재 ' +
-          UI().esc(AA.display(key, it.value)) +
-          ' · 출처 ' +
-          UI().esc(WSP.scenario.SOURCE_LABEL[it.source]) +
+          ' 고치기</h3><p class="sheet__desc">지금 ' +
+          UI().esc(it.value == null ? '입력 전' : AA.display(key, it.value)) +
           '</p><label class="field"><span class="field__label">' +
           (isMonths ? '개월 수' : '금액(만원)') +
           '</span><input class="text-input" id="asset-edit-value" inputmode="numeric" value="' +

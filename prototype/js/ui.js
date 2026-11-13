@@ -111,17 +111,34 @@
     );
   }
 
-  const SOURCE_TONE = { BANK: 'info', STATED: 'success', ESTIMATED: 'warning', UNKNOWN: 'neutral' };
-  function sourceBadge(source) {
-    return '<span class="src src--' + (SOURCE_TONE[source] || 'neutral') + '">' + esc(SC.SOURCE_LABEL[source] || source) + '</span>';
-  }
-
   const COND_TONE = { MET: 'success', UNMET: 'danger', UNKNOWN: 'neutral', IN_PROGRESS: 'warning' };
   function condBadge(status) {
     return badge(WSP.ruleEngine.STATUS_LABEL[status] || status, COND_TONE[status]);
   }
 
   /* ---------- 대화 ---------- */
+  function figures(list) {
+    if (!list || !list.length) return '';
+    return (
+      '<div class="figs">' +
+      list
+        .map(
+          (f) =>
+            '<div class="fig' +
+            (f.tone ? ' is-' + f.tone : '') +
+            '"><span class="fig__label">' +
+            esc(f.label) +
+            '</span><strong class="fig__value">' +
+            esc(f.value) +
+            '</strong>' +
+            (f.note ? '<span class="fig__note">' + esc(f.note) + '</span>' : '') +
+            '</div>'
+        )
+        .join('') +
+      '</div>'
+    );
+  }
+
   function renderMessage(m) {
     if (m.role === 'user') return '<div class="msg msg--user"><div class="msg__bubble">' + esc(m.text) + '</div></div>';
     if (m.role === 'system') return '<div class="msg-sys' + (m.tone ? ' is-' + m.tone : '') + '">' + (m.tone === 'warning' ? I.alert : I.info) + '<span>' + esc(m.text) + '</span></div>';
@@ -129,12 +146,12 @@
       '<div class="msg msg--bot"><div class="bot-label">' +
       I.spark.replace('<svg', '<svg width="13" height="13"') +
       'AI 도우미' +
-      (m.fallback ? '<span class="bot-label__fb">기본 선택지</span>' : '') +
       '</div><div class="msg__bubble' +
       (m.tone === 'warning' ? ' is-warning' : '') +
       '">' +
       esc(m.text).replace(/\n/g, '<br>') +
       '</div>' +
+      figures(m.figures) +
       (m.why ? '<div class="msg__why">' + I.question.replace('<svg', '<svg width="13" height="13"') + esc(m.why) + '</div>' : '') +
       '</div>'
     );
@@ -145,6 +162,20 @@
       (messages || []).map(renderMessage).join('') +
       (thinking ? '<div class="thinking" aria-label="AI가 생각하는 중"><span class="thinking__dots"><i></i><i></i><i></i></span>AI가 확인하고 있어요</div>' : '')
     );
+  }
+
+  /** 가장 최근 메시지의 첫 줄이 화면 위로 밀려나지 않는 만큼만 아래로 내린다 */
+  function scrollToLatest(body) {
+    if (!body) return;
+    const bottom = body.scrollHeight - body.clientHeight;
+    const msgs = body.querySelectorAll('.chat-log > .msg, .chat-log > .msg-sys');
+    const last = msgs[msgs.length - 1];
+    if (!last) {
+      body.scrollTop = bottom;
+      return;
+    }
+    const top = last.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 12;
+    body.scrollTop = Math.max(0, Math.min(bottom, top));
   }
 
   function chatInput(id, action, placeholder, disabled) {
@@ -435,10 +466,7 @@
     const t = SC.getTask(state.taskId);
     const running = state.status === 'RUNNING';
     const finished = !!TM_STATUS[state.status];
-    let html = '';
-    if (state.mode === 'ai')
-      html += notice('<strong>AI 도우미가 연 기존 업무 화면이에요.</strong><br>닫으면 결과와 관계없이 은행 기록을 다시 확인해요.', 'info', I.spark);
-    html += '<div class="tm-hero"><span class="tm-hero__icon">' + (TASK_ICON[t.icon] || I.doc) + '</span><div><p>' + esc(t.desc) + '</p><span class="tm-hero__meta">' + I.clock + '약 ' + t.minutes + '분</span></div></div>';
+    let html = '<div class="tm-hero"><span class="tm-hero__icon">' + (TASK_ICON[t.icon] || I.doc) + '</span><div><p>' + esc(t.desc) + '</p><span class="tm-hero__meta">' + I.clock + '약 ' + t.minutes + '분</span></div></div>';
     if (t.prep.length) html += '<div class="tm-sec"><h4>준비물</h4><ul class="tm-prep">' + t.prep.map((p) => '<li>' + esc(p) + '</li>').join('') + '</ul></div>';
     if (t.fields) {
       html +=
@@ -643,10 +671,10 @@
     badge: badge,
     notice: notice,
     kvRows: kvRows,
-    sourceBadge: sourceBadge,
     condBadge: condBadge,
     queryErrorCard: queryErrorCard,
     chatLog: chatLog,
+    scrollToLatest: scrollToLatest,
     chatInput: chatInput,
     registerScreen: registerScreen,
     init: init,

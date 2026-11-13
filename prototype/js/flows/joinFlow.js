@@ -213,7 +213,8 @@
     if (!c.ok || !l.ok) {
       think(false);
       const e = (!c.ok ? c : l).error;
-      saySystem('은행 기록을 확인하지 못했어요. 확인되지 않은 정보로는 진행하지 않아요. (' + e.message + ')', 'warning');
+      WSP.events.add('JOIN', '은행 기록 조회 실패: ' + e.code, 'warn');
+      saySystem('은행 기록을 확인하지 못했어요. 잠시 후 다시 확인해 주세요.', 'warning');
       fsm().transition('QUERY_FAILED', { code: e.code });
       return;
     }
@@ -365,7 +366,6 @@
       if (setConstraint(a.key, a.value, 'CUSTOMER', '"' + t + '"')) changed = true;
     });
     j.pendingKey = null;
-    sayAI(ai);
     await afterConstraints(changed, st);
   }
 
@@ -545,7 +545,7 @@
     const ex = j.exception || {};
     const ep = A().epoch();
     if (kind === 'consult') {
-      escalate('EXCEPTION', '업무 처리 결과를 확인하지 못했어요 (' + ex.cause + ').');
+      escalate('EXCEPTION', '업무 처리 결과를 확인하지 못했어요.');
       fsm().transition('UNRESOLVABLE', { cause: ex.cause, by: 'customer' });
       return A().refresh(SCREENS);
     }
@@ -557,7 +557,7 @@
       return advance();
     }
     // requery: 처리 중이던 업무 결과를 조회하면 은행 처리가 끝났는지 알 수 있다
-    sayUser('처리 결과 다시 확인');
+    sayUser('처리 결과 다시 확인해 주세요');
     if (ex.cause === 'IN_PROGRESS' && ex.sessionId) {
       think(true);
       const r = await bank.getTaskResult(ex.sessionId);
@@ -679,7 +679,7 @@
 
   function escalateFailed() {
     if (fsm().state !== 'FAILED') return;
-    escalate('APPLY_FAILED', '은행이 가입 요청을 처리하지 못했어요' + (S().application && S().application.failureReason ? ' (' + S().application.failureReason + ')' : '') + '.');
+    escalate('APPLY_FAILED', (S().application && S().application.failureReason) || '은행이 가입 요청을 처리하지 못했어요.');
     fsm().transition('ESCALATE', { reason: 'APPLY_FAILED' });
     UI().navigate('support', { track: 'join' }, { replace: true });
   }

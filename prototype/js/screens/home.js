@@ -218,7 +218,7 @@
       const ctx = params.from === 'asset' && s.asset && s.asset.handoffTerms ? s.asset.handoffTerms : null;
       const joinActive = app().fsms.join.state !== 'IDLE' && s.join && s.join.productId === p.id;
       const directActive = app().fsms.direct.state !== 'IDLE' && s.direct && s.direct.productId === p.id;
-      const rows = [['상품 유형', esc(p.type)], ['금리', esc(p.rate) + ' (가상)']];
+      const rows = [['상품 유형', esc(p.type)], ['금리', esc(p.rate)]];
       if (p.periods.length) rows.push(['가입 기간', p.periods.map((m) => m + '개월').join(' · ')]);
       if (p.maxMonthly) rows.push(['월 납입', man(p.minMonthly) + ' ~ ' + man(p.maxMonthly)]);
       return (
@@ -249,7 +249,7 @@
         '</div>' +
         '<div class="section-title">가입 조건</div><div class="card"><ul class="cond-list">' +
         p.conditions.map((id) => '<li>' + I.check + esc(SC.CONDITIONS[id].label) + '</li>').join('') +
-        '</ul><p class="fineprint">충족 여부는 가입 지원을 시작하면 은행 기록으로 확인해요.</p></div>' +
+        '</ul></div>' +
         '<div class="section-title">가입 방법 선택</div>' +
         '<div class="join-choice">' +
         '<button class="join-choice__item is-ai" data-action="join-start" data-product="' +
@@ -269,7 +269,6 @@
         (directActive ? '직접 가입 이어서 하기' : '직접 가입') +
         '</strong><span>기존 가입 화면을 단계별로 직접 진행해요</span></button>' +
         '</div>' +
-        '<p class="fineprint">두 방법 모두 같은 은행 기록과 가입 조건을 사용하고, 마지막 가입 승인은 고객님이 직접 해요.</p>' +
         '</div>'
       );
     },

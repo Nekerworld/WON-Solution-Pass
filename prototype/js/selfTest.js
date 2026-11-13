@@ -325,6 +325,11 @@
     assert(n === SC.POLICY.assetQuestionLimit, '질문 ' + n + '회');
     assert(af().history().some((h) => h.event === 'LIMIT_OR_STOP'), '한도 분기 없음');
     assert(af().state === 'REVIEW' && WSP.app.session.asset.proposal.level === 'LIMITED', '상태 ' + af().state);
+    const chat = WSP.app.session.asset.chat;
+    assert(!chat.some((m) => /반영했어요/.test(m.text)), '답변 확인 메시지가 남아 있음');
+    const prop = chat.filter((m) => m.kind === 'proposal').pop();
+    assert(prop && prop.figures && prop.figures.length >= 2, '제안 큰 숫자 없음');
+    assert(/실제와 다를 수 있어요/.test(prop.text), '불확실성 안내 없음: ' + prop.text);
   });
 
   t('모름·답변 거부는 재계산 없이 제안 가능 판단으로 가고, 최소 정보가 없으면 보류', async () => {

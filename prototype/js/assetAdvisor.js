@@ -259,17 +259,14 @@
       const longer = months + 12;
       const usable = b.usableForGoal.value || 0;
       const needLonger = roundUp(Math.max(0, b.target.value - usable) / longer);
-      alternatives.push({ id: 'LONGER', label: '기간을 ' + withRo(display('goalMonths', longer)) + ' 늘리기', detail: '필요 월 적립액 ' + man(needLonger), apply: { goalMonths: longer } });
-      alternatives.push({
-        id: 'LOWER_GOAL',
-        label: '목표 금액을 ' + withRo(man(roundDown((b.capacity.value || 0) * months + usable - (val(info, 'plannedLumpSum') || 0)))) + ' 조정',
-        detail: '현재 여력으로 기간 안에 모을 수 있는 금액',
-        apply: { goalAmount: roundDown((b.capacity.value || 0) * months + usable - (val(info, 'plannedLumpSum') || 0)) },
-      });
+      const lowered = roundDown((b.capacity.value || 0) * months + usable - (val(info, 'plannedLumpSum') || 0));
+      alternatives.push({ id: 'LONGER', label: '기간을 ' + withRo(display('goalMonths', longer)) + ' 늘릴게요', detail: '매달 ' + man(needLonger) + '씩 모으면 돼요', apply: { goalMonths: longer } });
+      alternatives.push({ id: 'LOWER_GOAL', label: '목표 금액을 ' + withRo(man(lowered)) + ' 줄일게요', detail: '지금 여유로 기간 안에 모을 수 있는 금액이에요', apply: { goalAmount: lowered } });
     }
     if (b.emergencyMonths.value != null && b.emergencyMonths.value < SC.POLICY.emergencyMonths) {
-      alternatives.push({ id: 'EMERGENCY_FIRST', label: '비상자금 ' + SC.POLICY.emergencyMonths + '개월분부터 채우기', detail: '현재 ' + b.emergencyMonths.text + '분', apply: {} });
+      alternatives.push({ id: 'EMERGENCY_FIRST', label: '비상자금부터 채울게요', detail: '생활비 ' + SC.POLICY.emergencyMonths + '개월치가 기준인데, 지금은 ' + b.emergencyMonths.text + '치예요', apply: {} });
     }
+    const uncertain = Object.keys(info.items).filter((k) => p.critical.concat(p.important).indexOf(k) !== -1 && (!known(info, k) || (info.items[k].source !== 'STATED' && info.items[k].source !== 'BANK')));
     return {
       purpose: p.label,
       tags: p.tags,
@@ -277,8 +274,41 @@
       months: months,
       feasible: metrics.feasible,
       alternatives: alternatives,
-      uncertain: Object.keys(info.items).filter((k) => (p.critical.concat(p.important).indexOf(k) !== -1 && (!known(info, k) || info.items[k].source !== 'STATED' && info.items[k].source !== 'BANK'))),
+      uncertain: uncertain,
+      estimated: uncertain.filter((k) => known(info, k)),
+      unconfirmed: uncertain.filter((k) => !known(info, k)),
     };
+  }
+
+  /* ------------------------------------------------------------------
+   * 고객에게 보여 줄 큰 숫자 (한 번에 3개까지)
+   * ------------------------------------------------------------------ */
+  function interpretFigures(metrics, purposeId) {
+    const b = metrics.byKey;
+    const figs = [];
+    const add = (label, m, value, note, tone) => m.value != null && figs.push({ label: label, value: value, note: note || '', tone: tone || '' });
+    add('매달 남는 돈', b.surplus, '월 ' + b.surplus.text, '소득에서 생활비를 뺀 금액이에요');
+    if (purposeId === 'EMERGENCY') {
+      add('바로 쓸 수 있는 예금', b.emergencyMonths, '생활비 ' + b.emergencyMonths.text + '치', '생활비 ' + SC.POLICY.emergencyMonths + '개월치가 기준이에요');
+      add('남겨 둘 비상자금', b.reserve, b.reserve.text, '생활비 ' + SC.POLICY.emergencyMonths + '개월치예요');
+      return figs;
+    }
+    add('무리 없이 모을 수 있는 돈', b.capacity, '월 ' + b.capacity.text, '남는 돈의 70% 정도예요');
+    const short = b.needMonthly.value != null && b.capacity.value != null ? b.needMonthly.value - b.capacity.value : null;
+    add('목표까지 매달 필요한 돈', b.needMonthly, '월 ' + b.needMonthly.text, short > 0 ? '여유보다 매달 ' + man(short) + ' 더 필요해요' : '', short > 0 ? 'warning' : '');
+    return figs;
+  }
+
+  function proposalFigures(basis, metrics) {
+    if (basis.monthly == null) return [];
+    const b = metrics.byKey;
+    const figs = [{ label: '매달 모을 돈', value: '월 ' + man(basis.monthly), note: '', tone: '' }];
+    if (basis.months) figs.push({ label: '모으는 기간', value: display('goalMonths', basis.months), note: '', tone: '' });
+    if (b.expectedAmount.value != null) {
+      const short = b.target.value != null ? b.target.value - b.expectedAmount.value : null;
+      figs.push({ label: '기간이 끝나면', value: '약 ' + man(b.expectedAmount.value), note: short > 0 ? '목표보다 ' + man(short) + ' 적어요 (이자 제외)' : '이자는 빼고 계산했어요', tone: short > 0 ? 'warning' : '' });
+    }
+    return figs;
   }
 
   /** 서비스 탐색: 상담 목적·기간에 맞는 상품. 선택은 고객이 한다. */
@@ -310,6 +340,8 @@
     canAsk: canAsk,
     proposable: proposable,
     proposalBasis: proposalBasis,
+    interpretFigures: interpretFigures,
+    proposalFigures: proposalFigures,
     matchProducts: matchProducts,
   };
 })();

@@ -37,7 +37,7 @@
         '</h3><p>' +
         esc(p.summary) +
         '</p>' +
-        UI.kvRows([['금리', esc(p.rate) + ' (가상)']]) +
+        UI.kvRows([['금리', esc(p.rate)]]) +
         '</div><button class="check-btn' +
         (d.input.agreed ? ' is-on' : '') +
         '" data-action="direct-agree"><span class="check-btn__box">' +

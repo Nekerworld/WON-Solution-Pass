@@ -285,34 +285,15 @@
     });
   }
 
-  function assetTag(info, coverage) {
-    return run('정보 출처 정리', { items: Object.keys(info.items).map((k) => k + ':' + info.items[k].source) }, {}, () => {
-      const by = { BANK: [], ESTIMATED: [], UNKNOWN: [] };
-      ['monthlyIncome', 'monthlyExpense', 'liquidAssets', 'investAssets', 'debt'].forEach((k) => {
-        const s = info.items[k].source;
-        (by[s] || (by[s] = [])).push(AA().ITEMS[k].label);
-      });
-      const parts = [];
-      if (by.BANK.length) parts.push(josa(by.BANK.join('·'), '은') + ' 연결 기관에서 조회했고');
-      if (by.ESTIMATED.length) parts.push(josa(by.ESTIMATED.join('·'), '은') + ' 입출금 내역으로 추정했어요');
-      let message = parts.join(', ') + '.';
-      if (by.UNKNOWN.length) message += ' ' + josa(by.UNKNOWN.join('·'), '은') + ' ' + coverage.notLinked.join('·') + ' 미연결로 확인하지 못했어요.';
-      return { intent: 'TAG_SOURCES', message: message, actions: [{ type: 'EXPLAIN', text: message }] };
-    });
-  }
-
   function assetInterpret(metrics) {
     return run('지표 해석', { metrics: metrics.list.map((m) => m.key + '=' + m.value) }, {}, () => {
       const b = metrics.byKey;
       const parts = [];
-      if (b.surplus.value != null) parts.push('매달 약 ' + b.surplus.text + '이 남고, 무리 없이 모을 수 있는 금액은 월 ' + b.capacity.text + ' 정도예요');
-      if (b.emergencyMonths.value != null) parts.push('예금성 자산은 생활비 ' + b.emergencyMonths.text + '분이에요');
+      if (b.surplus.value != null) parts.push('매달 약 ' + josa(b.surplus.text, '이') + ' 남고, 그중 무리 없이 모을 수 있는 돈은 월 ' + b.capacity.text + ' 정도예요');
+      if (b.emergencyMonths.value != null) parts.push('바로 쓸 수 있는 예금은 생활비 ' + b.emergencyMonths.text + '치예요');
       if (b.needMonthly.value != null)
-        parts.push('목표를 채우려면 월 ' + b.needMonthly.text + '이 필요해요' + (metrics.feasible === false ? '. 지금 여력보다 많아서 조정이 필요해요' : ''));
-      const unc = [];
-      metrics.list.forEach((m) => m.value != null && m.uncertain.forEach((k) => unc.indexOf(k) === -1 && unc.push(k)));
-      let message = parts.join('. ') + '.';
-      if (unc.length) message += ' (' + josa(unc.map((k) => AA().ITEMS[k].label).join('·'), '은') + ' 추정값이거나 미확인이라 오차가 있을 수 있어요.)';
+        parts.push('목표를 채우려면 매달 ' + josa(b.needMonthly.text, '이') + ' 필요해요' + (metrics.feasible === false ? '. 지금 여유보다 많아서 조정이 필요해요' : ''));
+      const message = parts.length ? parts.join('. ') + '.' : '지금 정보로는 계산할 수 있는 게 많지 않아요.';
       return { intent: 'INTERPRET', message: message, actions: [{ type: 'EXPLAIN', text: message }] };
     });
   }
@@ -326,14 +307,17 @@
     }));
   }
 
+  const UNKNOWN_REPLY = '괜찮아요. 아는 정보로 계속할게요.';
+  const REFUSED_REPLY = '알겠어요. 그 부분은 빼고 계속할게요.';
+  const STOP_REPLY = '알겠어요. 지금까지 들은 내용으로 알려 드릴게요.';
+
   function assetAnswer(text, q) {
     return run('답변 이해', { text: text, question: q ? q.id : null }, { infoKeys: Object.keys(AA().ITEMS) }, () => {
       if (isEscalate(text)) return { intent: 'REQUEST_CONSULT', message: '상담 연결을 도와드릴게요.', actions: [{ type: 'ESCALATE', reason: 'CUSTOMER_REQUEST' }] };
-      if (isStopQuestions(text)) return { intent: 'STOP_QUESTIONS', message: '질문은 그만할게요. 지금까지 확인한 정보로 판단해 볼게요.', actions: [{ type: 'STOP_QUESTIONS' }] };
+      if (isStopQuestions(text)) return { intent: 'STOP_QUESTIONS', message: STOP_REPLY, actions: [{ type: 'STOP_QUESTIONS' }] };
       if (isExit(text)) return { intent: 'EXIT', message: '상담을 마칠게요.', actions: [{ type: 'END' }] };
-      if (/모르|글쎄|잘\s?몰/.test(text)) return { intent: 'UNKNOWN', message: '괜찮아요. 모르는 정보는 미확인으로 두고 진행할게요.', actions: [{ type: 'HOLD', reason: 'UNKNOWN' }] };
-      if (/말하기\s?싫|답하고\s?싶지|비밀|안\s?알려/.test(text))
-        return { intent: 'REFUSED', message: '알겠어요. 답하지 않으신 정보는 미확인으로 두고 진행할게요.', actions: [{ type: 'HOLD', reason: 'REFUSED' }] };
+      if (/모르|글쎄|잘\s?몰/.test(text)) return { intent: 'UNKNOWN', message: UNKNOWN_REPLY, actions: [{ type: 'HOLD', reason: 'UNKNOWN' }] };
+      if (/말하기\s?싫|답하고\s?싶지|비밀|안\s?알려/.test(text)) return { intent: 'REFUSED', message: REFUSED_REPLY, actions: [{ type: 'HOLD', reason: 'REFUSED' }] };
       if (!q) return { intent: 'UNCLEAR', message: '말씀을 정확히 이해하지 못했어요.', actions: [{ type: 'EXPLAIN', text: 'unclear' }] };
       let value = AA().ITEMS[q.key].kind === 'months' ? parseMonths(text) : parseAmount(text);
       if (value == null && q.key === 'plannedLumpSum' && /없/.test(text)) value = 0;
@@ -375,11 +359,16 @@
       let text;
       if (basis.monthly == null) text = '지금 정보로는 월 적립액을 계산하기 어려워요.';
       else {
-        text = '월 ' + man(basis.monthly) + '씩' + (basis.months ? ' ' + AA().display('goalMonths', basis.months) + ' 동안' : '') + ' 모으는 방향을 제안해요.';
-        if (b.expectedAmount.value != null) text += ' 기간이 끝나면 약 ' + man(b.expectedAmount.value) + '(이자 제외)이 돼요.';
-        if (basis.feasible === false) text += ' 목표 총액 ' + b.target.text + '에는 못 미쳐서, 아래 조정안도 함께 보여드려요.';
+        text = '매달 ' + man(basis.monthly) + '씩' + (basis.months ? ' ' + AA().display('goalMonths', basis.months) + ' 동안' : '') + ' 모아 보시는 걸 제안해요.';
+        if (b.expectedAmount.value != null) text += ' 기간이 끝나면 약 ' + josa(man(b.expectedAmount.value), '이') + ' 모여요.';
+        if (basis.feasible === false) text += ' 목표인 ' + b.target.text + '에는 못 미쳐서, 바꿀 수 있는 방법도 함께 보여 드릴게요.';
       }
-      if (level === 'LIMITED') text += ' 일부 정보가 미확인이라 제한적인 제안이에요.';
+      const label = (keys) => keys.map((k) => AA().ITEMS[k].label).join('·');
+      const est = basis.estimated || [];
+      const unc = basis.unconfirmed || [];
+      if (est.length && unc.length) text += ' ' + josa(label(est), '은') + ' 입출금 내역으로 추정한 값이고 ' + josa(label(unc), '은') + ' 확인하지 못해서, 실제와 다를 수 있어요.';
+      else if (est.length) text += ' ' + josa(label(est), '은') + ' 입출금 내역으로 추정한 값이라 실제와 다를 수 있어요.';
+      else if (unc.length) text += ' ' + josa(label(unc), '은') + ' 확인하지 못해서 실제와 다를 수 있어요.';
       return { intent: 'PROPOSE', message: text, actions: [{ type: 'PROPOSE', text: text, level: level }] };
     });
   }
@@ -397,11 +386,12 @@
     },
     injectInvalidNext: () => (injectInvalid = true),
     isInjecting: () => injectInvalid,
+    REPLY: { UNKNOWN: UNKNOWN_REPLY, REFUSED: REFUSED_REPLY, STOP: STOP_REPLY },
     CONSTRAINT_QUESTION: CONSTRAINT_QUESTION,
     CONSTRAINT_WHY: CONSTRAINT_WHY,
     parse: { constraints: parseConstraints, amount: parseAmount, months: parseMonths, isEscalate: isEscalate, isExit: isExit, isMismatch: isMismatch, isStopQuestions: isStopQuestions },
     join: { explainCheck: joinExplainCheck, ask: joinAsk, interpret: joinInterpret, present: joinPresent, explainNoRoute: joinExplainNoRoute, afterRecheck: joinAfterRecheck },
     handoffSummary: handoffSummary,
-    asset: { goal: assetGoal, tag: assetTag, interpret: assetInterpret, ask: assetAsk, answer: assetAnswer, modify: assetModify, propose: assetPropose },
+    asset: { goal: assetGoal, interpret: assetInterpret, ask: assetAsk, answer: assetAnswer, modify: assetModify, propose: assetPropose },
   };
 })();

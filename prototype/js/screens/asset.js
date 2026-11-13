@@ -1,6 +1,6 @@
 /**
  * screens/asset.js
- * 자산관리 상담: 동의, 상담(현재 정보·지표·대화·제안·다음 행동), 서비스 탐색.
+ * 자산관리 상담: 동의, 상담(대화·큰 숫자·제안·다음 행동), 서비스 탐색.
  */
 (function () {
   'use strict';
@@ -34,7 +34,7 @@
         ')의 잔액·입출금·카드 내역</li><li>상담 중 고객님이 답한 정보</li></ul>' +
         '<p class="fineprint">연결되지 않은 기관(' +
         esc(fin.notLinked.join(', ')) +
-        ')의 정보는 추측하지 않고 "미확인"으로 표시해요.</p></div>' +
+        ')의 정보는 쓰지 않아요.</p></div>' +
         '<div class="card card--outline"><h3 class="card__title">' +
         I.lock +
         '이 상담에서 하지 않는 것</h3><ul class="consent-list consent-list--no"><li>상품 가입·이체·해지</li><li>방향 선택을 가입으로 처리하는 것 — 가입은 상품을 고른 뒤 따로 해요</li></ul></div>' +
@@ -45,113 +45,37 @@
 
   const INFO_KEYS = ['monthlyIncome', 'monthlyExpense', 'liquidAssets', 'investAssets', 'debt', 'goalAmount', 'goalMonths', 'plannedLumpSum', 'monthlySavingPref'];
 
-  function infoCard(a, editable) {
+  /** 정보 다시 확인: 값과 고치기 버튼만 보여 준다 */
+  function infoEditor(a) {
     if (!a.info) return '';
     const rows = INFO_KEYS.filter((k) => !(k === 'monthlySavingPref' && a.info.items[k].value == null))
       .map((k) => {
         const it = a.info.items[k];
-        const declined = a.info.declined.indexOf(k) !== -1;
         return (
           '<li class="info__row"><span class="info__label">' +
           esc(AA.ITEMS[k].label) +
           '</span><span class="info__val">' +
-          esc(AA.display(k, it.value)) +
-          (declined ? '<small>답변 안 함</small>' : '') +
-          '</span>' +
-          UI.sourceBadge(it.source) +
-          (editable ? '<button class="info__edit" data-action="asset-edit" data-key="' + k + '">고치기</button>' : '') +
-          '</li>'
+          esc(it.value == null ? '입력 전' : AA.display(k, it.value)) +
+          '</span><button class="info__edit" data-action="asset-edit" data-key="' +
+          k +
+          '">고치기</button></li>'
         );
       })
       .join('');
-    const hist = a.info.history.filter((h) => h.correction || h.reason);
+    return '<div class="info"><div class="info__head"><strong>' + I.list + '고객님 정보</strong></div><ul>' + rows + '</ul></div>';
+  }
+
+  function alternativesCard(a) {
+    const alts = a.proposal ? a.proposal.basis.alternatives : [];
+    if (!alts.length) return '';
     return (
-      '<div class="info"><div class="info__head"><strong>' +
-      I.list +
-      '현재 고객 정보</strong>' +
-      (a.coverage ? '<span class="info__cov">연결 ' + esc(a.coverage.linked.join('·') || '없음') + ' · 미연결 ' + esc(a.coverage.notLinked.join('·')) + '</span>' : '') +
-      '</div><ul>' +
-      rows +
-      '</ul>' +
-      (hist.length
-        ? '<details class="info__hist"><summary>변경 이력 ' +
-          hist.length +
-          '건</summary><ul>' +
-          hist
-            .slice(-8)
-            .map(
-              (h) =>
-                '<li>' +
-                esc(AA.ITEMS[h.key] ? AA.ITEMS[h.key].label : h.key) +
-                ': ' +
-                esc(AA.display(h.key, h.from)) +
-                ' → ' +
-                esc(AA.display(h.key, h.to)) +
-                ' <small>' +
-                esc(h.reason) +
-                (h.correction ? ' · 정정' : '') +
-                '</small></li>'
-            )
-            .join('') +
-          '</ul></details>'
-        : '') +
+      '<div class="proposal__alts"><span>이렇게 바꿀 수도 있어요</span>' +
+      alts.map((x) => '<button class="alt" data-action="asset-alt" data-alt="' + x.id + '"><strong>' + esc(x.label) + '</strong><small>' + esc(x.detail) + '</small></button>').join('') +
       '</div>'
     );
   }
 
-  function metricsCard(a) {
-    if (!a.metrics) return '';
-    const show = ['surplus', 'emergencyMonths', 'needMonthly', 'capacity', 'recommendedMonthly'];
-    return (
-      '<div class="metrics"><div class="metrics__head"><strong>' +
-      I.chart +
-      '계산 결과</strong><span>고정 공식 · 같은 정보면 같은 결과</span></div><div class="metrics__grid">' +
-      show
-        .map((k) => {
-          const m = a.metrics.byKey[k];
-          const unc = m.value != null && m.uncertain.length;
-          return (
-            '<div class="metric' +
-            (m.value == null ? ' is-na' : '') +
-            '"><span class="metric__label">' +
-            esc(m.label) +
-            '</span><strong>' +
-            esc(m.text) +
-            '</strong><span class="metric__f">' +
-            esc(m.formula) +
-            '</span>' +
-            (unc ? '<span class="metric__unc">추정·미확인 포함</span>' : '') +
-            '</div>'
-          );
-        })
-        .join('') +
-      '</div></div>'
-    );
-  }
-
-  function proposalCard(a) {
-    const p = a.proposal;
-    if (!p) return '';
-    const b = p.basis;
-    return (
-      '<div class="proposal"><div class="proposal__head">' +
-      UI.badge(p.level === 'FULL' ? '제안' : '제한적 제안', p.level === 'FULL' ? 'info' : 'warning') +
-      '<strong>' +
-      esc(b.purpose) +
-      '</strong></div><p>' +
-      esc(p.text) +
-      '</p>' +
-      (b.alternatives.length
-        ? '<div class="proposal__alts"><span>조정안</span>' +
-          b.alternatives.map((x) => '<button class="alt" data-action="asset-alt" data-alt="' + x.id + '"><strong>' + esc(x.label) + '</strong><small>' + esc(x.detail) + '</small></button>').join('') +
-          '</div>'
-        : '') +
-      (b.uncertain.length ? '<p class="proposal__unc">' + I.info + '추정·미확인: ' + esc(b.uncertain.map((k) => AA.ITEMS[k].label).join(', ')) + '</p>' : '') +
-      '<p class="proposal__note">방향을 고르는 것은 상품 가입이 아니에요.</p></div>'
-    );
-  }
-
-  const GOAL_CHIPS = ['2년 뒤 집 살 때 보탤 목돈 마련', '결혼 자금 3천만원을 3년 안에', '비상자금이 충분한지 점검'];
+  const GOAL_CHIPS = ['2년 뒤 집 살 때 보탤 목돈을 모으고 싶어요', '결혼 자금 3천만원을 3년 안에 모으고 싶어요', '비상자금이 충분한지 알고 싶어요'];
 
   function actionPanel(a) {
     const st = af().state;
@@ -167,11 +91,11 @@
         SC.POLICY.assetQuestionLimit +
         '</span><div class="chip-row">' +
         q.options.map((o) => '<button class="chip chip--lg" data-action="asset-chip" data-value="' + o[1] + '" data-label="' + esc(o[0]) + '">' + esc(o[0]) + '</button>').join('') +
-        '</div><div class="chip-row chip-row--sub"><button class="chip" data-action="asset-chip" data-value="UNKNOWN" data-label="잘 모르겠어요">잘 모르겠어요</button><button class="chip" data-action="asset-chip" data-value="REFUSED" data-label="답하고 싶지 않아요">답하고 싶지 않아요</button><button class="chip chip--accent" data-action="asset-chip" data-value="STOP" data-label="질문은 그만하고 지금 정보로 알려줘">질문은 그만하고 지금 정보로 알려줘</button></div></div>'
+        '</div><div class="chip-row chip-row--sub"><button class="chip" data-action="asset-chip" data-value="UNKNOWN" data-label="잘 모르겠어요">잘 모르겠어요</button><button class="chip" data-action="asset-chip" data-value="REFUSED" data-label="답하고 싶지 않아요">답하고 싶지 않아요</button><button class="chip chip--accent" data-action="asset-chip" data-value="STOP" data-label="지금 정보로 알려주세요">지금 정보로 알려주세요</button></div></div>'
       );
     }
     if (st === 'REVIEW')
-      return '<div class="act">' + proposalCard(a) + '<button class="btn btn--primary btn--block" data-action="asset-accept">이 방향으로 할게요</button><p class="act__hint">조건을 바꾸려면 아래에 입력해 주세요. 예: "기간을 3년으로", "월 80만원씩"</p></div>';
+      return '<div class="act">' + alternativesCard(a) + '<button class="btn btn--primary btn--block" data-action="asset-accept">이 방향으로 할게요</button><p class="act__hint">조건을 바꾸려면 아래에 입력해 주세요. 예: "기간을 3년으로", "월 80만원씩"</p></div>';
     if (st === 'NEXT_ACTION')
       return (
         '<div class="act"><div class="next-grid">' +
@@ -199,7 +123,7 @@
     if (st === 'RECONSULT')
       return (
         '<div class="act">' +
-        UI.notice(a.info ? '위 정보 카드에서 틀린 항목의 "고치기"를 눌러 주세요.' : '정보를 다시 불러온 뒤 분석해요.', 'info', I.info) +
+        (a.info ? infoEditor(a) : UI.notice('정보를 다시 불러온 뒤 분석해요.', 'info', I.info)) +
         '<div class="btn-row"><button class="btn btn--ghost" data-action="asset-end">상담 종료</button><button class="btn btn--primary" data-action="asset-resume">' +
         (a.info ? '다시 분석' : '다시 조회하고 분석') +
         '</button></div></div>'
@@ -228,8 +152,6 @@
       return (
         UI.appbar('AI 자산관리 상담', { right: right }) +
         '<div class="screen-body asset-body" id="asset-body">' +
-        infoCard(a, st === 'RECONSULT') +
-        metricsCard(a) +
         '<div class="chat-log">' +
         UI.chatLog(a.chat, a.thinking) +
         '</div>' +
@@ -239,8 +161,7 @@
       );
     },
     mount(el, params, ctx) {
-      const body = el.querySelector('#asset-body');
-      if (body) body.scrollTop = body.scrollHeight;
+      UI.scrollToLatest(el.querySelector('#asset-body'));
       if (ctx && ctx.first) WSP.assetFlow.resume();
     },
   });
@@ -266,7 +187,7 @@
         '</strong>' +
         (t.goalText ? '<small>"' + esc(t.goalText) + '"</small>' : '') +
         '</div>' +
-        '<p class="lead">방향에 맞는 상품이에요. 상품을 고르는 것은 가입이 아니고, 가입은 다음 화면에서 따로 시작해요.</p>' +
+        '<p class="lead">정한 방향에 맞는 상품이에요.</p>' +
         list
           .map((m) => {
             const p = SC.getProduct(m.productId);

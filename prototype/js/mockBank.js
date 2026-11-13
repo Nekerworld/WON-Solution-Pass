@@ -290,7 +290,7 @@
         channel: req.channel || 'AI',
         status: outcome,
         createdAt: Date.now(),
-        failureReason: outcome === 'FAILED' ? '은행 처리 거절 (가상 응답)' : null,
+        failureReason: outcome === 'FAILED' ? '은행에서 가입 요청을 처리하지 못했어요.' : null,
       };
       store.update((d) => {
         d.applications[id] = app;
@@ -344,7 +344,7 @@
       if (app.status === 'SUCCESS' || app.status === 'FAILED') return false;
       store.update((d) => {
         d.applications[appId].status = status;
-        if (status === 'FAILED') d.applications[appId].failureReason = '은행 처리 결과 실패 (가상 응답)';
+        if (status === 'FAILED') d.applications[appId].failureReason = '은행에서 가입 요청을 처리하지 못했어요.';
       }, '[시연] 가입 ' + appId + ' 은행 측 확정: ' + status);
       return true;
     },

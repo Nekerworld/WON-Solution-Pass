@@ -74,15 +74,12 @@
       met +
       '/' +
       total +
-      '</strong>' +
-      (ev && ev.ok ? '<span class="ck__ver">은행 기록 v' + ev.stateVersion + '</span>' : '') +
-      '</div><div class="ck__bar"><i style="width:' +
+      '</strong></div><div class="ck__bar"><i style="width:' +
       Math.round((met / total) * 100) +
       '%"></i></div><ul>' +
       rows +
       '</ul>' +
       plan +
-      (ready ? '<p class="ck__ready">' + I.check + '가입 준비 완료 · 아직 가입된 것은 아니에요</p>' : '') +
       '</div>'
     );
   }
@@ -171,7 +168,7 @@
       return (
         '<div class="act"><div class="ready-card"><strong>' +
         I.check +
-        '가입 준비가 끝났어요</strong><p>준비 완료는 가입 완료가 아니에요. 가입 정보를 확인하고 직접 승인해 주세요.</p>' +
+        '가입 준비가 끝났어요</strong><p>가입 정보를 확인하고 직접 승인해 주세요.</p>' +
         (j.applyNotice ? '<p class="ready-card__warn">' + esc(j.applyNotice.text) + '</p>' : '') +
         '<button class="btn btn--primary btn--block" data-action="join-open-apply">가입 정보 확인하기</button></div></div>'
       );
@@ -203,9 +200,6 @@
         UI.appbar(p.name + ' 가입', { right: right }) +
         '<div class="screen-body join-body" id="join-body">' +
         checklist(j) +
-        (j.skipped.length
-          ? '<div class="skipped">' + I.check + '묻지 않은 정보: ' + esc(j.skipped.map((s) => s.label + '(' + s.reason + ')').join(', ')) + '</div>'
-          : '') +
         '<div class="chat-log">' +
         UI.chatLog(j.chat, j.thinking) +
         '</div>' +
@@ -216,8 +210,7 @@
       );
     },
     mount(el, params, ctx) {
-      const body = el.querySelector('#join-body');
-      if (body) body.scrollTop = body.scrollHeight;
+      UI.scrollToLatest(el.querySelector('#join-body'));
       if (ctx && ctx.first) WSP.joinFlow.resume();
     },
   });
@@ -247,7 +240,7 @@
         '<div class="card"><h3 class="card__title">' +
         esc(p.name) +
         '</h3>' +
-        UI.kvRows([['금리', esc(p.rate) + ' (가상)']]) +
+        UI.kvRows([['금리', esc(p.rate)]]) +
         '</div>' +
         '<div class="card"><label class="field"><span class="field__label">월 납입액</span><input class="text-input" id="apply-monthly" data-field="monthly" inputmode="numeric" value="' +
         monthly +
@@ -269,7 +262,7 @@
         '은행 기록으로 확인한 가입 조건</h3><ul class="cond-list">' +
         (ev ? ev.conditions.map((c) => '<li>' + I.check + esc(c.label) + '</li>').join('') : '') +
         '</ul>' +
-        (ev && ev.ok ? '<p class="fineprint">기록 버전 v' + ev.stateVersion + ' · 승인 시 은행이 조건을 한 번 더 확인해요.</p>' : '') +
+        '<p class="fineprint">승인하면 은행이 조건을 한 번 더 확인해요.</p>' +
         '</div></div>' +
         '<div class="screen-footer"><button class="btn btn--primary btn--block btn--lg" data-action="join-approve">가입 승인</button></div>'
       );
@@ -310,7 +303,6 @@
         title: '가입이 완료됐어요',
         desc: '은행 처리 결과로 확인했어요.',
         rows: rows,
-        metrics: d.metrics,
         foot: '<button class="btn btn--primary btn--block" data-action="' + newAction + '">홈으로</button>',
       };
     }
@@ -323,7 +315,7 @@
         rows: rows,
         foot:
           '<div class="btn-row">' +
-          (isJoin ? '<button class="btn btn--secondary" data-action="join-escalate-failed">상담 연결</button>' : '<button class="btn btn--secondary" data-action="noop">고객센터 1588-0000(가상)</button>') +
+          (isJoin ? '<button class="btn btn--secondary" data-action="join-escalate-failed">상담 연결</button>' : '<button class="btn btn--secondary" data-action="noop">고객센터 1588-0000</button>') +
           '<button class="btn btn--primary" data-action="' +
           newAction +
           '">처음으로</button></div>',
@@ -349,17 +341,6 @@
     };
   }
 
-  function metricsHtml(m, track) {
-    if (!m) return '';
-    const sec = m.endedAt ? Math.max(1, Math.round((m.endedAt - m.startedAt) / 1000)) : null;
-    const rows =
-      track === 'direct'
-        ? [['입력 단계 진행', m.steps + '회'], ['처음부터 다시', m.restarts + '회'], ['직접 찾은 메뉴', m.menuVisits + '회']]
-        : [['AI 질문', m.questions + '회'], ['연결된 업무 화면', m.tasks + '회']];
-    if (sec) rows.push(['걸린 시간', sec + '초']);
-    return '<div class="card card--outline"><h3 class="card__title">' + I.chart + '이번 가입 기록</h3>' + UI.kvRows(rows) + '</div>';
-  }
-
   UI.registerScreen('apply-result', {
     title: '가입 결과',
     white: true,
@@ -378,7 +359,6 @@
         esc(v.desc) +
         '</p></div>' +
         (v.rows.length ? '<div class="card">' + UI.kvRows(v.rows) + '</div>' : '') +
-        metricsHtml(v.metrics, params.track) +
         '</div>' +
         (v.foot ? '<div class="screen-footer">' + v.foot + '</div>' : '')
       );
@@ -436,7 +416,6 @@
           I.doc +
           '상담 요약</strong>' +
           UI.badge(consult && consult.status === 'ACCEPTED' ? '전달됨' : '아직 접수 전', consult && consult.status === 'ACCEPTED' ? 'success' : 'neutral') +
-          (h.fallback ? UI.badge('기본 요약', 'warning') : '') +
           '</div><ul>' +
           h.lines.map((l) => '<li>' + esc(l) + '</li>').join('') +
           '</ul></div>';
@@ -455,7 +434,7 @@
         result =
           '<div class="card card--warning"><h3 class="card__title">' +
           I.alert +
-          '상담 접수가 완료되지 않았어요</h3><p>요약은 만들었지만 접수는 되지 않았어요. 아래 방법으로 다시 연결해 주세요.</p><ul class="consent-list"><li>잠시 후 다시 접수하기</li><li>고객센터 1588-0000 (가상 번호)</li><li>가까운 영업점 방문 (신분증 지참)</li></ul></div>';
+          '상담 접수가 완료되지 않았어요</h3><p>요약은 만들었지만 접수는 되지 않았어요. 아래 방법으로 다시 연결해 주세요.</p><ul class="consent-list"><li>잠시 후 다시 접수하기</li><li>고객센터 1588-0000</li><li>가까운 영업점 방문 (신분증 지참)</li></ul></div>';
       }
       const accepted = consult && consult.status === 'ACCEPTED';
       const canSubmit = !!h && !accepted && !!d.handoffConsent;
