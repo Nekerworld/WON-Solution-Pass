@@ -1,11 +1,12 @@
 /**
  * state.js
- * - 데모용 가상 정책(DEMO_POLICY)과 초기 은행 상태(initialBankState)
- * - 중앙 상태 저장소(createStore): 모든 화면/모듈이 같은 저장소를 참조한다.
- * - 이벤트 로그(events)
- * - 해결패스 유한 상태머신(createFSM): 전이 테이블에 없는 전이는 거부한다.
- *
- * 모든 값은 시연용 가상 데이터이며 실제 은행 시스템/정책과 무관하다.
+ * - 공용 유틸, 이벤트 로그, 중앙 상태 저장소(createStore)
+ * - 트랙별 유한 상태머신 정의(FSM_DEFS)와 생성기(createFSM)
+ *   전이표에 없는 전이는 거부한다. 각 간선에는 출처(src)를 기록한다.
+ *   D: 합의 워크플로우(Group 1.png)에 있는 화살표
+ *   P1~P8: 계획 0-2절에서 제안한 보완 전이
+ *   S: 안전 장치(중복 실행 방지, 결과 조회 등) 전이
+ * - 동작 등록소(WSP.actions): 각 모듈이 data-action 처리기를 등록한다.
  */
 (function () {
   'use strict';
@@ -13,7 +14,7 @@
   const WSP = (window.WSP = window.WSP || {});
 
   function clone(value) {
-    return JSON.parse(JSON.stringify(value));
+    return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
   }
 
   function safeStorage() {
@@ -28,69 +29,7 @@
     }
   }
 
-  /* ------------------------------------------------------------------
-   * 데모용 가상 정책 - 실제 우리은행 정책이 아니다.
-   * ------------------------------------------------------------------ */
-  const DEMO_POLICY = Object.freeze({
-    version: 'DEMO-POLICY-2026.11',
-    isDemo: true,
-    /** 이 금액을 초과하는 이체는 디지털 OTP 등록이 필요하다 (가상) */
-    otpRequiredAbove: 1000000,
-    /** OTP 없이 설정할 수 있는 1일 이체한도 상한 (가상) */
-    maxLimitWithoutOtp: 1000000,
-    /** 디지털 OTP 등록 전 고객확인 완료가 필요하다 (가상) */
-    otpRegistrationRequiresKyc: true,
-    minTransferLimit: 100000,
-    maxTransferLimit: 50000000,
-    /**
-     * 해결 행동별 비용 가중치 (가상). 상태 그래프 간선의 weight로 쓰이며,
-     * 경로 탐색은 이 합이 최소인 경로를 고른다.
-     * 비용 = 사용자 부담(소요 시간·입력량) + 인증 강도 + 채널 제약을 단순 점수화한 값
-     */
-    actionWeights: Object.freeze({
-      COMPLETE_KYC: 5,
-      REGISTER_OTP: 3,
-      CHANGE_TRANSFER_LIMIT: 2,
-      RETURN_TO_TRANSFER: 1,
-    }),
-  });
-
-  const initialBankState = Object.freeze({
-    account: {
-      name: '우리 주거래 통장',
-      number: '1002-***-123456',
-      balance: 5000000,
-    },
-    customer: {
-      name: '김우리',
-      kycCompleted: true,
-      digitalOtpRegistered: false,
-      transferLimit: 1000000,
-      transferLimitChangeAllowed: true,
-      accountRestricted: false,
-    },
-    transfer: {
-      fromAccount: '1002-***-123456',
-      amount: 1500000,
-      recipient: '홍길동',
-      recipientBank: '우리은행',
-      recipientAccount: '1002-***-987654',
-      requestId: null,
-      transactionId: null,
-      status: 'IDLE',
-    },
-    transactions: {},
-    simulation: {
-      /** 다음 이체 요청에 대해 가상 은행이 반환할 결과 (시연 패널에서만 변경) */
-      nextTransferOutcome: 'SUCCESS',
-      /** 상태 조회 실패 주입 */
-      queryFailure: false,
-    },
-    system: {
-      bankAvailable: true,
-      stateVersion: 1,
-    },
-  });
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   /* ------------------------------------------------------------------
    * 이벤트 로그
@@ -101,12 +40,7 @@
     const listeners = new Set();
     return {
       add(source, message, meta) {
-        const entry = {
-          at: new Date().toISOString(),
-          source: source,
-          message: message,
-          meta: meta || null,
-        };
+        const entry = { at: new Date().toISOString(), source: source, message: message, meta: meta || null };
         items.push(entry);
         if (items.length > max) items = items.slice(items.length - max);
         listeners.forEach((fn) => {
@@ -131,7 +65,7 @@
     };
   }
 
-  const events = createEventLog(300);
+  const events = createEventLog(400);
 
   /* ------------------------------------------------------------------
    * 중앙 상태 저장소
@@ -139,7 +73,7 @@
   function createStore(initial, options) {
     const opts = options || {};
     const storage = opts.persist === false ? null : safeStorage();
-    const key = opts.storageKey || 'wsp.bankState.v1';
+    const key = opts.storageKey || 'wsp.store';
     const listeners = new Set();
     let silent = false;
 
@@ -179,7 +113,6 @@
     }
 
     return {
-      /** 항상 깊은 복사본을 반환하여 외부에서 직접 변경하지 못하게 한다. */
       getState() {
         return clone(state);
       },
@@ -201,7 +134,6 @@
         emit({ type: 'reset', reason: reason, stateVersion: state.system.stateVersion });
         return clone(state);
       },
-      /** 자가 테스트 후 스냅샷 복원용 */
       replace(snapshot, reason) {
         state = clone(snapshot);
         persist();
@@ -219,51 +151,148 @@
   }
 
   /* ------------------------------------------------------------------
-   * 해결패스 유한 상태머신
+   * 상태머신 정의
+   * 간선: [from, event, to, src]
    * ------------------------------------------------------------------ */
-  const FSM_STATES = Object.freeze([
-    'IDLE',
-    'DIAGNOSING',
-    'PLAN_READY',
-    'WAITING_USER',
-    'RECHECKING',
-    'READY_TO_RETRY',
-    'VERIFYING',
-    'COMPLETED',
-    'ESCALATED',
-    'RESULT_UNCERTAIN',
-  ]);
+  const EXIT_P8 = (states, to) => states.map((s) => [s, 'EXIT', to, 'P8']);
 
-  /**
-   * 전이 테이블: state -> { event: nextState }
-   * - PENDING 결과는 전이 없이 VERIFYING에 머물며 결과 조회만 허용한다.
-   * - COMPLETED는 VERIFYING에서 RESULT_SUCCESS로만 도달 가능하다.
-   * - ESCALATED: 앱 안에서 해결할 수 없어 상담·재확인으로 넘긴 상태. 출금이 확정되지 않은
-   *   거래가 없으므로 NEW_CASE로 IDLE에 돌아갈 수 있다. (차단 사유, 경로 없음, 실패 확정)
-   * - RESULT_UNCERTAIN: 출금 여부를 알 수 없는 거래가 있는 상태. 중복 출금을 막기 위해
-   *   재진단·새 건(IDLE)으로 가는 간선이 없고, 결과 조회(RESULT_QUERY)로만 빠져나간다.
-   */
-  const FSM_TRANSITIONS = Object.freeze({
-    IDLE: { TRANSFER_FAILED: 'DIAGNOSING', MANUAL_DIAGNOSE: 'DIAGNOSING' },
-    DIAGNOSING: { PATH_FOUND: 'PLAN_READY', NO_ACTION_NEEDED: 'READY_TO_RETRY', ESCALATE: 'ESCALATED' },
-    PLAN_READY: { STEP_SELECTED: 'WAITING_USER', RECHECK: 'RECHECKING', ESCALATE: 'ESCALATED' },
-    WAITING_USER: { USER_RETURNED: 'RECHECKING', RECHECK: 'RECHECKING', ESCALATE: 'ESCALATED' },
-    RECHECKING: { PATH_FOUND: 'PLAN_READY', ALL_MET: 'READY_TO_RETRY', ESCALATE: 'ESCALATED' },
-    READY_TO_RETRY: { USER_APPROVED: 'VERIFYING', RECHECK: 'RECHECKING', ESCALATE: 'ESCALATED' },
-    VERIFYING: {
-      RESULT_SUCCESS: 'COMPLETED',
-      RESULT_FAILED: 'ESCALATED',
-      RESULT_UNKNOWN: 'RESULT_UNCERTAIN',
-      ESCALATE: 'ESCALATED',
+  const FSM_DEFS = Object.freeze({
+    join: {
+      name: '가입 지원 (AI)',
+      initial: 'IDLE',
+      edges: [
+        ['IDLE', 'START', 'CONSENT', 'D'],
+        ['CONSENT', 'AGREE', 'CHECKING', 'D'],
+        ['CHECKING', 'NONE_MISSING', 'READY_TO_APPLY', 'D'],
+        ['CHECKING', 'MISSING', 'CLARIFYING', 'D'],
+        ['CHECKING', 'QUERY_FAILED', 'CHECK_FAILED', 'P3'],
+        ['CHECK_FAILED', 'RETRY', 'CHECKING', 'P3'],
+        ['CHECK_FAILED', 'ESCALATE', 'ESCALATED', 'P3'],
+        ['CLARIFYING', 'CLARIFIED', 'ROUTE_CHECK', 'D'],
+        ['CLARIFYING', 'ESCALATE', 'ESCALATED', 'P8'],
+        ['ROUTE_CHECK', 'ROUTE_FOUND', 'OPTIONS_READY', 'D'],
+        ['ROUTE_CHECK', 'NO_ROUTE', 'ESCALATED', 'D'],
+        ['OPTIONS_READY', 'TASK_OPENED', 'TASK_OPEN', 'D'],
+        ['OPTIONS_READY', 'CONSTRAINT_CHANGED', 'CLARIFYING', 'P4'],
+        ['OPTIONS_READY', 'ESCALATE', 'ESCALATED', 'P8'],
+        ['TASK_OPEN', 'MODAL_CLOSED', 'RECHECKING', 'D'],
+        ['RECHECKING', 'ALL_MET', 'READY_TO_APPLY', 'D'],
+        ['RECHECKING', 'REMAINING', 'REMAINING', 'D'],
+        ['RECHECKING', 'EXCEPTION', 'INVESTIGATING', 'D'],
+        ['REMAINING', 'TASK_OPENED', 'TASK_OPEN', 'D'],
+        ['REMAINING', 'NO_ROUTE', 'ESCALATED', 'P1'],
+        ['REMAINING', 'ESCALATE', 'ESCALATED', 'P8'],
+        ['INVESTIGATING', 'RESOLVED', 'RECHECKING', 'P2'],
+        ['INVESTIGATING', 'RETRY', 'REMAINING', 'P2'],
+        ['INVESTIGATING', 'UNRESOLVABLE', 'ESCALATED', 'D'],
+        ['READY_TO_APPLY', 'APPROVED', 'APPLYING', 'D'],
+        ['APPLYING', 'SUBMITTED', 'VERIFYING', 'D'],
+        ['APPLYING', 'NOT_SENT', 'READY_TO_APPLY', 'S'],
+        ['APPLYING', 'REJECTED', 'RECHECKING', 'S'],
+        ['VERIFYING', 'RESULT_SUCCESS', 'COMPLETED', 'D'],
+        ['VERIFYING', 'RESULT_FAILED', 'FAILED', 'D'],
+        ['VERIFYING', 'RESULT_UNKNOWN', 'RESULT_UNCERTAIN', 'D'],
+        ['RESULT_UNCERTAIN', 'RESULT_QUERY', 'VERIFYING', 'S'],
+        ['COMPLETED', 'NEW_CASE', 'IDLE', 'S'],
+        ['FAILED', 'NEW_CASE', 'IDLE', 'S'],
+        ['FAILED', 'ESCALATE', 'ESCALATED', 'P7'],
+        ['ESCALATED', 'RECHECK', 'CHECKING', 'P7'],
+        ['ESCALATED', 'NEW_CASE', 'IDLE', 'P7'],
+      ].concat(EXIT_P8(['CONSENT', 'CHECK_FAILED', 'CLARIFYING', 'OPTIONS_READY', 'REMAINING', 'INVESTIGATING', 'READY_TO_APPLY'], 'IDLE')),
     },
-    COMPLETED: { NEW_CASE: 'IDLE' },
-    ESCALATED: { RECHECK: 'RECHECKING', NEW_CASE: 'IDLE' },
-    RESULT_UNCERTAIN: { RESULT_QUERY: 'VERIFYING' },
+    direct: {
+      name: '직접 가입',
+      initial: 'IDLE',
+      edges: [
+        ['IDLE', 'START', 'D_START', 'D'],
+        ['D_START', 'BEGIN', 'D_STEP', 'D'],
+        ['D_STEP', 'STEP_DONE', 'D_CHECK', 'D'],
+        ['D_CHECK', 'PASS', 'D_STEP', 'D'],
+        ['D_CHECK', 'UNMET', 'D_NOTICE', 'D'],
+        ['D_CHECK', 'ALL_PASSED', 'D_APPROVE', 'P5'],
+        ['D_CHECK', 'QUERY_FAILED', 'D_STEP', 'S'],
+        ['D_NOTICE', 'GO_FIX', 'D_SELF_FIX', 'D'],
+        ['D_SELF_FIX', 'RESTART', 'D_STEP', 'P6'],
+        ['D_APPROVE', 'APPROVED', 'D_VERIFYING', 'P5'],
+        ['D_APPROVE', 'REJECTED', 'D_NOTICE', 'S'],
+        ['D_VERIFYING', 'RESULT_SUCCESS', 'D_DONE', 'D'],
+        ['D_VERIFYING', 'RESULT_FAILED', 'D_FAILED', 'S'],
+        ['D_VERIFYING', 'RESULT_UNKNOWN', 'D_UNCERTAIN', 'S'],
+        ['D_UNCERTAIN', 'RESULT_QUERY', 'D_VERIFYING', 'S'],
+        ['D_DONE', 'NEW_CASE', 'IDLE', 'S'],
+        ['D_FAILED', 'NEW_CASE', 'IDLE', 'S'],
+      ].concat(EXIT_P8(['D_START', 'D_STEP', 'D_NOTICE', 'D_SELF_FIX', 'D_APPROVE'], 'IDLE')),
+    },
+    asset: {
+      name: '자산관리',
+      initial: 'IDLE',
+      edges: [
+        ['IDLE', 'START', 'CONSENT', 'D'],
+        ['CONSENT', 'AGREE', 'GOAL', 'D'],
+        ['GOAL', 'GOAL_SET', 'COLLECTING', 'D'],
+        ['COLLECTING', 'COLLECTED', 'TAGGING', 'D'],
+        ['COLLECTING', 'QUERY_FAILED', 'HOLD', 'P3'],
+        ['TAGGING', 'TAGGED', 'CALCULATING', 'D'],
+        ['CALCULATING', 'CALCULATED', 'INTERPRETING', 'D'],
+        ['INTERPRETING', 'INTERPRETED', 'GAP_CHECK', 'D'],
+        ['GAP_CHECK', 'NO_GAP', 'PROPOSED_FULL', 'D'],
+        ['GAP_CHECK', 'ASK', 'ASKING', 'D'],
+        ['GAP_CHECK', 'LIMIT_OR_STOP', 'PROPOSABLE_CHECK', 'D'],
+        ['ASKING', 'ANSWERED', 'RECALC_ANSWER', 'D'],
+        ['ASKING', 'UNKNOWN_OR_REFUSED', 'PROPOSABLE_CHECK', 'D'],
+        ['ASKING', 'STOP_REQUEST', 'PROPOSABLE_CHECK', 'D'],
+        ['RECALC_ANSWER', 'RECALCULATED', 'INTERPRETING', 'D'],
+        ['PROPOSABLE_CHECK', 'PROPOSABLE', 'PROPOSED_LIMITED', 'D'],
+        ['PROPOSABLE_CHECK', 'NOT_PROPOSABLE', 'HOLD', 'D'],
+        ['PROPOSED_FULL', 'SHOWN', 'REVIEW', 'D'],
+        ['PROPOSED_LIMITED', 'SHOWN', 'REVIEW', 'D'],
+        ['REVIEW', 'ACCEPT', 'NEXT_ACTION', 'D'],
+        ['REVIEW', 'MODIFY', 'RECALC_CHANGE', 'D'],
+        ['REVIEW', 'END', 'CLOSED', 'D'],
+        ['RECALC_CHANGE', 'RECALCULATED', 'INTERPRETING', 'D'],
+        ['NEXT_ACTION', 'CONSULT', 'HANDOFF', 'D'],
+        ['NEXT_ACTION', 'KEEP', 'CLOSED', 'D'],
+        ['NEXT_ACTION', 'RECHECK_INFO', 'RECONSULT', 'D'],
+        ['NEXT_ACTION', 'EXPLORE', 'EXPLORE', 'D'],
+        ['EXPLORE', 'PRODUCT_SELECTED', 'TO_JOIN', 'D'],
+        ['EXPLORE', 'BACK', 'NEXT_ACTION', 'S'],
+        ['HOLD', 'CONSULT', 'HANDOFF', 'P7'],
+        ['HOLD', 'RECHECK_INFO', 'RECONSULT', 'P7'],
+        ['HOLD', 'END', 'CLOSED', 'P7'],
+        ['RECONSULT', 'RESUME', 'INTERPRETING', 'P7'],
+        ['RECONSULT', 'END', 'CLOSED', 'P7'],
+        ['HANDOFF', 'END', 'CLOSED', 'P7'],
+        ['CLOSED', 'NEW_CASE', 'IDLE', 'S'],
+        ['TO_JOIN', 'NEW_CASE', 'IDLE', 'S'],
+      ].concat(EXIT_P8(['CONSENT', 'GOAL', 'ASKING', 'GAP_CHECK', 'REVIEW', 'NEXT_ACTION', 'EXPLORE', 'HOLD'], 'CLOSED')),
+    },
   });
 
-  function createFSM(options) {
+  function buildTable(def) {
+    const table = {};
+    const src = {};
+    const states = [];
+    const addState = (s) => {
+      if (states.indexOf(s) === -1) states.push(s);
+    };
+    addState(def.initial);
+    def.edges.forEach((e) => {
+      addState(e[0]);
+      addState(e[2]);
+      (table[e[0]] = table[e[0]] || {})[e[1]] = e[2];
+      src[e[0] + '|' + e[1]] = e[3];
+    });
+    return { table: table, src: src, states: states };
+  }
+
+  const FSM_TABLES = {};
+  Object.keys(FSM_DEFS).forEach((k) => (FSM_TABLES[k] = buildTable(FSM_DEFS[k])));
+
+  function createFSM(kind, options) {
     const opts = options || {};
-    let current = opts.initial || 'IDLE';
+    const def = FSM_DEFS[kind];
+    const tbl = FSM_TABLES[kind];
+    let current = def.initial;
     let history = [];
     const listeners = new Set();
     const log = opts.log !== false;
@@ -279,42 +308,48 @@
     }
 
     return {
+      kind: kind,
       get state() {
         return current;
       },
       can(event) {
-        const row = FSM_TRANSITIONS[current];
+        const row = tbl.table[current];
         return !!(row && row[event]);
       },
-      /** @returns {{ok:boolean, from:string, to?:string, event:string}} */
       transition(event, meta) {
-        const row = FSM_TRANSITIONS[current];
+        const row = tbl.table[current];
         const next = row && row[event];
         if (!next) {
           if (log) {
-            console.warn('[WSP FSM] 거부된 전이: ' + current + ' --' + event + '--> (정의되지 않음)');
-            events.add('FSM', '거부된 전이 ' + current + ' --' + event + '-->', { rejected: true });
+            console.warn('[WSP FSM:' + kind + '] 거부된 전이: ' + current + ' --' + event + '-->');
+            events.add('FSM', '[' + kind + '] 거부된 전이 ' + current + ' --' + event + '-->', { rejected: true });
           }
           return { ok: false, from: current, event: event };
         }
-        const record = { from: current, to: next, event: event, at: new Date().toISOString(), meta: meta || null };
+        const record = {
+          from: current,
+          to: next,
+          event: event,
+          src: tbl.src[current + '|' + event],
+          at: new Date().toISOString(),
+          meta: meta || null,
+        };
         current = next;
         history.push(record);
-        if (history.length > 100) history = history.slice(-100);
-        if (log) events.add('FSM', record.from + ' --' + event + '--> ' + next);
+        if (history.length > 120) history = history.slice(-120);
+        if (log) events.add('FSM', '[' + kind + '] ' + record.from + ' --' + event + '--> ' + next + (record.src !== 'D' ? ' (' + record.src + ')' : ''));
         notify(record);
         return { ok: true, from: record.from, to: next, event: event };
       },
       reset() {
-        current = 'IDLE';
+        current = def.initial;
         history = [];
-        if (log) events.add('FSM', '상태머신 초기화 → IDLE');
         notify(null);
       },
       restore(state, savedHistory) {
-        if (FSM_STATES.indexOf(state) === -1) return;
+        if (tbl.states.indexOf(state) === -1) return;
         current = state;
-        history = Array.isArray(savedHistory) ? savedHistory.slice(-100) : [];
+        history = Array.isArray(savedHistory) ? savedHistory.slice(-120) : [];
         notify(null);
       },
       history() {
@@ -328,7 +363,18 @@
   }
 
   /* ------------------------------------------------------------------
-   * 공용 포맷터
+   * 동작 등록소
+   * ------------------------------------------------------------------ */
+  const actions = {};
+  function registerActions(map) {
+    Object.keys(map).forEach((k) => {
+      if (actions[k]) console.warn('[WSP] 동작 중복 등록: ' + k);
+      actions[k] = map[k];
+    });
+  }
+
+  /* ------------------------------------------------------------------
+   * 포맷터
    * ------------------------------------------------------------------ */
   function formatWon(n) {
     return Number(n || 0).toLocaleString('ko-KR') + '원';
@@ -339,21 +385,47 @@
     const v = Number(n || 0);
     if (v >= 10000 && v % 10000 === 0) {
       const man = v / 10000;
-      if (man >= 10000 && man % 10000 === 0) return man / 10000 + '억원';
+      if (man >= 10000) {
+        const eok = Math.floor(man / 10000);
+        const rest = man % 10000;
+        return eok + '억' + (rest ? ' ' + rest.toLocaleString('ko-KR') + '만' : '') + '원';
+      }
       return man.toLocaleString('ko-KR') + '만원';
     }
     return formatWon(v);
   }
 
-  WSP.utils = { clone: clone, formatWon: formatWon, formatMan: formatMan, safeStorage: safeStorage };
-  WSP.DEMO_POLICY = DEMO_POLICY;
-  WSP.initialBankState = initialBankState;
+  /** [받침 있음, 받침 없음, 판단 불가] */
+  const JOSA = {
+    을: ['을', '를', '을(를)'],
+    이: ['이', '가', '이(가)'],
+    은: ['은', '는', '은(는)'],
+    과: ['과', '와', '과(와)'],
+    로: ['으로', '로', '(으)로'],
+    이에요: ['이에요', '예요', '(이)에요'],
+  };
+  /** 받침에 맞춘 조사를 붙인다. josa('계좌', '을') → '계좌를'. 끝의 괄호 보충 설명은 건너뛰고 판단한다. */
+  function josa(word, kind) {
+    const w = String(word);
+    const forms = JOSA[kind];
+    const base = w.replace(/\s*\([^)]*\)\s*$/, '');
+    const code = base.charCodeAt(base.length - 1) - 0xac00;
+    if (code < 0 || code > 11171) return w + forms[2];
+    const jong = code % 28;
+    if (kind === '로') return w + (jong === 0 || jong === 8 ? forms[1] : forms[0]);
+    return w + (jong === 0 ? forms[1] : forms[0]);
+  }
+
+  function newId(prefix) {
+    return prefix + '-' + Date.now().toString(36).toUpperCase().slice(-5) + Math.random().toString(36).slice(2, 5).toUpperCase();
+  }
+
+  WSP.utils = { clone: clone, formatWon: formatWon, formatMan: formatMan, safeStorage: safeStorage, sleep: sleep, newId: newId, josa: josa };
   WSP.events = events;
   WSP.createStore = createStore;
+  WSP.FSM_DEFS = FSM_DEFS;
+  WSP.FSM_TABLES = FSM_TABLES;
   WSP.createFSM = createFSM;
-  WSP.FSM_STATES = FSM_STATES;
-  WSP.FSM_TRANSITIONS = FSM_TRANSITIONS;
-
-  /** 애플리케이션 전체가 공유하는 단일 저장소 */
-  WSP.store = createStore(initialBankState, { storageKey: 'wsp.bankState.v1' });
+  WSP.actions = actions;
+  WSP.registerActions = registerActions;
 })();

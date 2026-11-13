@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0067AC" />
-  <meta name="description" content="WON 해결패스 인터랙티브 프로토타입 - 모든 데이터와 거래는 브라우저 내부 시뮬레이션입니다." />
+  <meta name="description" content="WON 해결패스 인터랙티브 목업 - 자산관리 상담과 상품 가입 지원 AI 에이전트" />
   <title>WON 해결패스 · 인터랙티브 프로토타입</title>
   <link rel="stylesheet" href="css/style.css" />
   <link rel="stylesheet" href="css/components.css" />
@@ -15,7 +15,11 @@
       <section class="stage-intro" aria-label="프로토타입 소개">
         <p class="stage-intro__eyebrow">WIN &amp; WON<br>2026 우리은행 X SSAFY 아이디어 경진대회</p>
         <h1 class="stage-intro__title">WON 해결패스</h1>
-        <p class="stage-intro__desc">“이체가 안 돼요”에서 해결 확인까지.<br />상태 기반 금융 업무 오류 해결 서비스 프로토타입</p>
+        <p class="stage-intro__desc">자산관리 상담에서 상품 선택, 가입 완료 확인까지.<br />우리WON뱅킹 AI 에이전트 목업</p>
+        <ul class="stage-intro__tracks">
+          <li><b>트랙 1</b>자산관리 → 상품 선택 → 가입 지원</li>
+          <li><b>트랙 2</b>상품 → 가입 지원 (AI와 함께 / 직접 가입)</li>
+        </ul>
       </section>
 
       <div class="phone" id="phone">
@@ -41,12 +45,22 @@
 
   <!-- ES Module 대신 일반 script를 의존 순서대로 로드한다 (file:// 실행 지원) -->
   <script src="js/state.js"></script>
+  <script src="js/data/scenario.js"></script>
   <script src="js/mockBank.js"></script>
   <script src="js/ruleEngine.js"></script>
   <script src="js/pathfinder.js"></script>
-  <script src="js/chatbot.js"></script>
+  <script src="js/assetAdvisor.js"></script>
+  <script src="js/aiSchema.js"></script>
+  <script src="js/aiAgent.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/flows/joinFlow.js"></script>
+  <script src="js/flows/directFlow.js"></script>
+  <script src="js/flows/assetFlow.js"></script>
+  <script src="js/screens/home.js"></script>
+  <script src="js/screens/join.js"></script>
+  <script src="js/screens/direct.js"></script>
+  <script src="js/screens/asset.js"></script>
   <script src="js/demoPanel.js"></script>
   <script src="js/selfTest.js"></script>
 </body>

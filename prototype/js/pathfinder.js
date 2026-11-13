@@ -1,172 +1,103 @@
 /**
  * pathfinder.js
- * 현재 추상 상태(facts)에서 목표 상태(goal)까지의 해결 경로를 계산한다.
- * 1) 상태 그래프 생성: 현재 상태에서 출발해 사전 조건을 만족하는 행동으로 도달 가능한
- *    모든 상태(노드)와 행동(간선)을 만든다. 간선 weight는 DEMO_POLICY.actionWeights.
- * 2) 다익스트라: 간선 weight 합이 최소인 목표 상태까지의 경로를 고른다.
- * - 방문한 상태는 직렬화 키로 식별하여 같은 상태를 중복 생성하지 않는다.
- * - 경로가 없거나 차단 사유가 있으면 상담 연결(ESCALATE_TO_SUPPORT)로 대체한다.
- * 고정된 순서 배열을 출력하지 않는다. 순서는 사전 조건, 현재 상태, 정책 가중치에서 결정된다.
+ * 현재 은행 사실(facts)에서 상품 조건(goal)까지 도달하는 업무 경로를 계산한다.
+ * 1) 상태 그래프: 업무(TASKS)의 선행 조건과 효과로 도달 가능한 상태를 펼친다.
+ *    고객 제약(constraints)이 false인 업무는 제외하고, 모르는 제약(null)은
+ *    낙관 모드에서만 허용한다.
+ * 2) 다익스트라: 업무 가중치 합이 가장 작은 경로를 고른다.
+ * 3) 다음 단계의 대체 수단 목록, 필요한 질문, 경로가 없을 때의 순환 원인을 함께 돌려준다.
+ * 업무와 대체 수단은 은행 데이터에서만 온다. 경로를 만들어 내지 않는다.
  */
 (function () {
   'use strict';
 
   const WSP = window.WSP;
-  const RE = WSP.ruleEngine;
-  const fmt = WSP.utils.formatWon;
-  const P = WSP.DEMO_POLICY;
+  const SC = WSP.scenario;
 
-  const MAX_DEPTH = 6;
+  const MAX_DEPTH = 7;
+  const FACT_KEYS = Object.keys(SC.FACTS);
 
-  /**
-   * precondition 형식
-   *  { fact, equals }                 : facts[fact] === equals
-   *  { fact, equals, constraint: id } : 규칙 엔진이 해당 제약(id)을 활성화했을 때만 적용
-   *  { goalSatisfied: true }          : 목표 상태의 모든 조건 충족
-   */
-  const ACTIONS = Object.freeze([
-    {
-      id: 'COMPLETE_KYC',
-      label: '고객확인 완료',
-      flowId: 'kyc-flow',
-      resolves: 'kycCompleted',
-      preconditions: [
-        { fact: 'kycCompleted', equals: false },
-        { fact: 'accountRestricted', equals: false },
-        { fact: 'bankAvailable', equals: true },
-      ],
-      effects: [{ fact: 'kycCompleted', value: true }],
-      phrase: { first: '고객확인을 완료한', mid: '고객확인을 완료하고', last: '고객확인을 완료해 주세요' },
-      cta: '고객확인 하러 가기',
-    },
-    {
-      id: 'REGISTER_OTP',
-      label: '디지털 OTP 등록',
-      flowId: 'otp-registration',
-      resolves: 'otpRegistered',
-      preconditions: [
-        { fact: 'otpRegistered', equals: false },
-        { fact: 'kycCompleted', equals: true, constraint: 'R08' },
-        { fact: 'accountRestricted', equals: false },
-        { fact: 'bankAvailable', equals: true },
-      ],
-      effects: [{ fact: 'otpRegistered', value: true }],
-      phrase: { first: 'OTP 등록을 진행한', mid: 'OTP 등록을 진행하고', last: 'OTP 등록을 진행해 주세요' },
-      cta: '디지털 OTP 등록하러 가기',
-    },
-    {
-      id: 'CHANGE_TRANSFER_LIMIT',
-      label: '이체한도 변경',
-      flowId: 'limit-management',
-      resolves: 'limitSufficient',
-      preconditions: [
-        { fact: 'limitSufficient', equals: false },
-        { fact: 'limitChangeAllowed', equals: true },
-        { fact: 'otpRegistered', equals: true, constraint: 'R03' },
-        { fact: 'accountRestricted', equals: false },
-        { fact: 'bankAvailable', equals: true },
-      ],
-      effects: [{ fact: 'limitSufficient', value: true }],
-      phrase: { first: '한도를 변경한', mid: '한도를 변경하고', last: '한도를 변경해 주세요' },
-      cta: '이체한도 변경하러 가기',
-    },
-    {
-      id: 'RETURN_TO_TRANSFER',
-      label: '원래 이체로 돌아가기',
-      flowId: 'transfer',
-      terminal: true,
-      preconditions: [{ goalSatisfied: true }, { fact: 'returnedToTransfer', equals: false }],
-      effects: [{ fact: 'returnedToTransfer', value: true }],
-      cta: '원래 이체로 돌아가기',
-    },
-    {
-      id: 'ESCALATE_TO_SUPPORT',
-      label: '상담 연결',
-      flowId: 'support',
-      fallbackOnly: true,
-      preconditions: [],
-      effects: [],
-      cta: '상담 연결 안내 보기',
-    },
-  ]);
+  const ACTIONS = SC.TASKS;
 
   function getAction(id) {
-    return ACTIONS.find((a) => a.id === id) || null;
+    return SC.getTask(id);
   }
 
-  function goalSatisfied(facts, goal) {
-    return Object.keys(goal).every((k) => facts[k] === goal[k]);
+  /** 'OK' | 'UNKNOWN' | 'BLOCKED' */
+  function availability(action, constraints) {
+    const c = constraints || {};
+    let result = 'OK';
+    Object.keys(action.needs || {}).forEach((k) => {
+      const v = c[k];
+      if (v === false) result = 'BLOCKED';
+      else if ((v === null || v === undefined) && result !== 'BLOCKED') result = 'UNKNOWN';
+    });
+    return result;
+  }
+
+  function unknownNeeds(action, constraints) {
+    const c = constraints || {};
+    return Object.keys(action.needs || {}).filter((k) => c[k] === null || c[k] === undefined);
+  }
+
+  function preOk(action, facts) {
+    return Object.keys(action.pre).every((f) => facts[f] === action.pre[f]);
+  }
+
+  function useful(action, facts) {
+    return Object.keys(action.effects).some((f) => facts[f] !== action.effects[f]);
+  }
+
+  function allowed(action, constraints, mode) {
+    const a = availability(action, constraints);
+    return a === 'OK' || (mode === 'optimistic' && a === 'UNKNOWN');
+  }
+
+  function sameEffect(a, b) {
+    return Object.keys(b.effects).some((f) => a.effects[f] === b.effects[f]);
   }
 
   function isGoal(facts, goal) {
-    return goalSatisfied(facts, goal) && facts.returnedToTransfer === true;
+    return Object.keys(goal).every((k) => facts[k] === goal[k]);
   }
 
-  function isApplicable(action, facts, goal, activeConstraints) {
-    if (action.fallbackOnly) return false;
-    return action.preconditions.every((pre) => {
-      if (pre.goalSatisfied) return goalSatisfied(facts, goal);
-      if (pre.constraint && !activeConstraints.has(pre.constraint)) return true;
-      return facts[pre.fact] === pre.equals;
-    });
+  function keyOf(facts) {
+    return FACT_KEYS.map((k) => k + ':' + (facts[k] ? 1 : 0)).join('|');
   }
 
   function applyEffects(action, facts) {
     const next = Object.assign({}, facts);
-    action.effects.forEach((e) => {
-      next[e.fact] = e.value;
-    });
+    Object.keys(action.effects).forEach((f) => (next[f] = action.effects[f]));
     return next;
   }
 
-  function keyOf(facts) {
-    return Object.keys(facts)
-      .sort()
-      .map((k) => k + ':' + (facts[k] ? 1 : 0))
-      .join('|');
-  }
-
-  function weightOf(action) {
-    const w = P.actionWeights && P.actionWeights[action.id];
-    return typeof w === 'number' && w > 0 ? w : 1;
-  }
-
-  /**
-   * 현재 상태에서 도달 가능한 상태 그래프를 만든다.
-   * 목표 상태와 깊이 제한(MAX_DEPTH)에 닿은 노드는 더 확장하지 않는다.
-   * @returns {{startKey:string, nodes:Map, edges:Array, adjacency:Map}}
-   */
-  function buildStateGraph(startFacts, goal, constraints) {
-    const active = new Set((constraints || []).map((c) => c.ruleId));
+  function buildStateGraph(startFacts, goal, constraints, mode) {
     const startKey = keyOf(startFacts);
     const nodes = new Map([[startKey, { key: startKey, facts: startFacts, depth: 0, goal: isGoal(startFacts, goal) }]]);
     const edges = [];
     const adjacency = new Map();
     const queue = [startKey];
-
     while (queue.length) {
       const key = queue.shift();
       const node = nodes.get(key);
       adjacency.set(key, []);
       if (node.goal || node.depth >= MAX_DEPTH) continue;
-      for (let i = 0; i < ACTIONS.length; i++) {
-        const action = ACTIONS[i];
-        if (!isApplicable(action, node.facts, goal, active)) continue;
+      ACTIONS.forEach((action) => {
+        if (!allowed(action, constraints, mode) || !preOk(action, node.facts) || !useful(action, node.facts)) return;
         const next = applyEffects(action, node.facts);
         const nk = keyOf(next);
         if (!nodes.has(nk)) {
           nodes.set(nk, { key: nk, facts: next, depth: node.depth + 1, goal: isGoal(next, goal) });
           queue.push(nk);
         }
-        const edge = { from: key, to: nk, actionId: action.id, weight: weightOf(action) };
+        const edge = { from: key, to: nk, actionId: action.id, weight: action.weight || 1, unknown: availability(action, constraints) === 'UNKNOWN' };
         edges.push(edge);
         adjacency.get(key).push(edge);
-      }
+      });
     }
     return { startKey: startKey, nodes: nodes, edges: edges, adjacency: adjacency };
   }
 
-  /** 다익스트라용 최소 힙. 비용이 같으면 먼저 넣은 항목이 먼저 나온다. */
   function createMinHeap() {
     const a = [];
     let seq = 0;
@@ -207,10 +138,6 @@
     };
   }
 
-  /**
-   * 상태 그래프에서 목표 노드까지 weight 합이 최소인 경로를 찾는다.
-   * @returns {{found:boolean, goalKey:string|null, cost:number, dist:Map, prev:Map, explored:number}}
-   */
   function dijkstra(graph) {
     const dist = new Map([[graph.startKey, 0]]);
     const prev = new Map();
@@ -218,15 +145,12 @@
     const heap = createMinHeap();
     heap.push(0, graph.startKey);
     let explored = 0;
-
     while (heap.size) {
       const { cost, key } = heap.pop();
       if (settled.has(key)) continue;
       settled.add(key);
       explored += 1;
-      if (graph.nodes.get(key).goal) {
-        return { found: true, goalKey: key, cost: cost, dist: dist, prev: prev, explored: explored };
-      }
+      if (graph.nodes.get(key).goal) return { found: true, goalKey: key, cost: cost, dist: dist, prev: prev, explored: explored };
       graph.adjacency.get(key).forEach((e) => {
         const nd = cost + e.weight;
         if (!dist.has(e.to) || nd < dist.get(e.to)) {
@@ -239,7 +163,6 @@
     return { found: false, goalKey: null, cost: Infinity, dist: dist, prev: prev, explored: explored };
   }
 
-  /** 시연 패널 시각화용 직렬화 그래프 */
   function serializeGraph(graph, search, pathEdges) {
     const onPath = new Set(pathEdges);
     return {
@@ -252,16 +175,12 @@
         goal: n.goal,
         dist: search.dist.has(n.key) ? search.dist.get(n.key) : null,
       })),
-      edges: graph.edges.map((e) => ({ from: e.from, to: e.to, actionId: e.actionId, weight: e.weight, onPath: onPath.has(e) })),
+      edges: graph.edges.map((e) => ({ from: e.from, to: e.to, actionId: e.actionId, weight: e.weight, unknown: e.unknown, onPath: onPath.has(e) })),
     };
   }
 
-  /**
-   * 상태 그래프 + 다익스트라 경로 탐색
-   * @returns {{found:boolean, steps:Array, cost:number, explored:number, visited:number, graph:Object}}
-   */
-  function findPath(startFacts, goal, constraints) {
-    const graph = buildStateGraph(startFacts, goal, constraints);
+  function findPath(startFacts, goal, constraints, mode) {
+    const graph = buildStateGraph(startFacts, goal, constraints, mode || 'optimistic');
     const search = dijkstra(graph);
     const pathEdges = [];
     if (search.found) {
@@ -272,73 +191,104 @@
         k = e.from;
       }
     }
-    const steps = pathEdges.map((e) => {
-      const action = getAction(e.actionId);
-      return {
-        actionId: action.id,
-        label: action.label,
-        flowId: action.flowId,
-        weight: e.weight,
-        before: graph.nodes.get(e.from).facts,
-        after: graph.nodes.get(e.to).facts,
-      };
-    });
     return {
       found: search.found,
-      steps: steps,
       cost: search.found ? search.cost : null,
+      steps: pathEdges.map((e) => ({ actionId: e.actionId, label: getAction(e.actionId).label, weight: e.weight, unknown: e.unknown })),
       explored: search.explored,
       visited: graph.nodes.size,
       graph: serializeGraph(graph, search, pathEdges),
     };
   }
 
+  /**
+   * 경로가 없을 때 원인을 찾는다.
+   * - NO_METHOD: 조건을 채울 업무가 고객 제약으로 모두 막힘
+   * - CYCLE: A를 하려면 B, B를 하려면 A가 필요한 순환
+   */
+  function detectCycle(facts, goal, constraints) {
+    const unmet = Object.keys(goal).filter((f) => facts[f] !== goal[f]);
+    const deps = {};
+    const stuck = new Set();
+    for (let i = 0; i < unmet.length; i++) {
+      const f = unmet[i];
+      const all = ACTIONS.filter((a) => a.effects[f] === true);
+      const producers = all.filter((a) => availability(a, constraints) !== 'BLOCKED');
+      if (!producers.length) {
+        return {
+          type: all.length ? 'NO_METHOD' : 'NO_TASK',
+          fact: f,
+          blocked: all.map((a) => ({ actionId: a.id, needs: Object.keys(a.needs).filter((k) => constraints[k] === false) })),
+        };
+      }
+      const needSets = producers.map((a) => Object.keys(a.pre).filter((p) => facts[p] !== a.pre[p]));
+      if (needSets.every((s) => s.length > 0)) stuck.add(f);
+      deps[f] = [];
+      needSets.forEach((s) => s.forEach((p) => deps[f].indexOf(p) === -1 && deps[f].push(p)));
+    }
+    const color = {};
+    let found = null;
+    function dfs(f, path) {
+      if (found) return;
+      color[f] = 1;
+      path.push(f);
+      (deps[f] || []).forEach((g) => {
+        if (found || !stuck.has(g)) return;
+        if (color[g] === 1) found = path.slice(path.indexOf(g)).concat([g]);
+        else if (!color[g]) dfs(g, path);
+      });
+      path.pop();
+      color[f] = 2;
+    }
+    Array.from(stuck).forEach((f) => !color[f] && dfs(f, []));
+    if (!found) return null;
+    const via = [];
+    for (let i = 0; i < found.length - 1; i++) {
+      const a = ACTIONS.find((x) => x.effects[found[i]] === true && x.pre[found[i + 1]] === true && availability(x, constraints) !== 'BLOCKED');
+      via.push(a ? a.id : null);
+    }
+    return { type: 'CYCLE', chain: found, via: via };
+  }
+
   let lastResult = null;
 
   /**
-   * 규칙 평가 결과로 해결 계획을 만든다.
-   * status: 'PLAN'    사용자 행동이 필요한 경로가 있음
-   *         'READY'   추가 절차 없이 원래 이체로 돌아갈 수 있음
-   *         'BLOCKED' 자동 해결 경로 생성 금지 (계좌 제한, 시스템 장애 등)
-   *         'NO_PATH' 목표에 도달하는 유효 경로 없음 -> 상담 안내
+   * 조건 판정 결과(evaluation)와 고객 제약으로 해결 경로를 계산한다.
+   * status: READY | PLAN | NO_PATH | BLOCKED | UNKNOWN
    */
-  function computePlan(evaluation) {
+  function computeRoute(evaluation, constraints) {
+    const c = constraints || {};
     let result;
-    if (evaluation.blockers.length) {
-      result = {
-        status: 'BLOCKED',
-        evaluation: evaluation,
-        steps: [],
-        actionSteps: [],
-        blocker: evaluation.blockers[0],
-        fallback: getAction('ESCALATE_TO_SUPPORT'),
-        explored: 0,
-        visited: 0,
-      };
-    } else {
-      const search = findPath(evaluation.facts, evaluation.goal, evaluation.constraints);
-      if (!search.found) {
-        result = {
-          status: 'NO_PATH',
-          evaluation: evaluation,
-          steps: [],
-          actionSteps: [],
-          fallback: getAction('ESCALATE_TO_SUPPORT'),
-          explored: search.explored,
-          visited: search.visited,
-          graph: search.graph,
-        };
+    if (!evaluation.ok) result = { status: 'UNKNOWN', steps: [], options: [], questions: [] };
+    else if (evaluation.blockers.length) result = { status: 'BLOCKED', blockers: evaluation.blockers, steps: [], options: [], questions: [] };
+    else if (evaluation.allMet) result = { status: 'READY', steps: [], options: [], questions: [], cost: 0 };
+    else {
+      const facts = evaluation.facts;
+      const goal = evaluation.goal;
+      const opt = findPath(facts, goal, c, 'optimistic');
+      if (!opt.found) {
+        result = { status: 'NO_PATH', steps: [], options: [], questions: [], cause: detectCycle(facts, goal, c), graph: opt.graph, visited: opt.visited, explored: opt.explored };
       } else {
-        const actionSteps = search.steps.filter((s) => !getAction(s.actionId).terminal);
+        // 확인된 제약만으로 갈 수 있는 경로가 있으면 묻지 않고 그 경로를 기본으로 쓴다.
+        const known = findPath(facts, goal, c, 'known');
+        const base = known.found ? known : opt;
+        const questions = [];
+        if (!known.found) {
+          opt.steps.forEach((s) => {
+            const a = getAction(s.actionId);
+            if (!unknownNeeds(a, c).length) return;
+            ACTIONS.filter((x) => sameEffect(x, a)).forEach((x) => unknownNeeds(x, c).forEach((k) => questions.indexOf(k) === -1 && questions.push(k)));
+          });
+        }
         result = {
-          status: actionSteps.length ? 'PLAN' : 'READY',
-          evaluation: evaluation,
-          steps: search.steps,
-          actionSteps: actionSteps,
-          cost: search.cost,
-          explored: search.explored,
-          visited: search.visited,
-          graph: search.graph,
+          status: 'PLAN',
+          steps: base.steps,
+          cost: base.cost,
+          questions: questions,
+          options: alternativesFor(facts, goal, c, base.steps[0]),
+          graph: base.graph,
+          visited: base.visited,
+          explored: base.explored,
         };
       }
     }
@@ -346,98 +296,45 @@
     lastResult = result;
     WSP.events.add(
       'PATH',
-      '경로 계산 [' +
-        result.status +
-        '] ' +
-        (result.steps.map((s) => s.actionId).join(' → ') || '-') +
-        (result.cost != null ? ' (비용 ' + result.cost + ')' : '') +
-        ' · 상태 ' +
-        result.visited +
-        '개 / 확정 ' +
-        result.explored +
-        '개'
+      '경로 계산 [' + result.status + '] ' + (result.steps.map((s) => s.actionId).join(' → ') || '-') + (result.cost != null ? ' (비용 ' + result.cost + ')' : '')
     );
     return result;
   }
 
-  /** 조회 실패 시: 정상 진단을 가장하지 않는다 */
-  function planFromQueryFailure(error) {
-    const blocker = RE.blockerFromQueryFailure(error);
-    const result = {
-      status: 'BLOCKED',
-      evaluation: null,
-      steps: [],
-      actionSteps: [],
-      blocker: blocker,
-      fallback: getAction('ESCALATE_TO_SUPPORT'),
-      explored: 0,
-      visited: 0,
-      queryError: error,
-      computedAt: Date.now(),
-    };
-    lastResult = result;
-    WSP.events.add('PATH', '상태 조회 실패로 경로 계산 중단 (' + (error && error.code) + ')');
-    return result;
-  }
-
-  /** 단계 카드 표시용 설명 */
-  function describeStep(actionId, ctx) {
-    switch (actionId) {
-      case 'COMPLETE_KYC':
+  /** 다음 단계와 같은 효과를 내는, 지금 시작할 수 있는 대체 수단 */
+  function alternativesFor(facts, goal, constraints, firstStep) {
+    if (!firstStep) return [];
+    const target = Object.keys(getAction(firstStep.actionId).effects);
+    return ACTIONS.filter((a) => target.some((f) => a.effects[f] === true) && preOk(a, facts) && useful(a, facts))
+      .map((a) => {
+        const av = availability(a, constraints);
+        const rest = av === 'BLOCKED' ? null : findPath(applyEffects(a, facts), goal, constraints, 'optimistic');
         return {
-          problem: '고객확인이 완료되지 않았어요.',
-          current: ctx.kycCompleted ? '완료' : '미완료',
-          action: '고객확인 화면에서 절차를 진행해요.',
-          expected: '디지털 OTP 등록과 이체가 가능한 상태가 돼요.',
-          ruleIds: ['R04'],
+          actionId: a.id,
+          label: a.label,
+          availability: av,
+          reachable: !!(rest && rest.found),
+          cost: rest && rest.found ? a.weight + rest.cost : null,
+          recommended: a.id === firstStep.actionId,
+          unknownNeeds: unknownNeeds(a, constraints),
+          blockedNeeds: Object.keys(a.needs).filter((k) => constraints[k] === false),
         };
-      case 'REGISTER_OTP': {
-        const needForTransfer = ctx.amount > P.otpRequiredAbove;
-        return {
-          problem: needForTransfer
-            ? fmt(P.otpRequiredAbove) + '을 넘는 이체에는 디지털 OTP가 필요해요.'
-            : '한도를 올리려면 디지털 OTP가 먼저 필요해요.',
-          current: ctx.otpRegistered ? '등록됨' : '미등록',
-          action: '디지털 OTP 등록 화면에서 이 기기를 등록해요.',
-          expected: '고액 이체 인증과 한도 상향이 가능해져요.',
-          ruleIds: needForTransfer ? ['R02', 'R03'] : ['R03'],
-        };
-      }
-      case 'CHANGE_TRANSFER_LIMIT':
-        return {
-          problem: '요청 금액 ' + fmt(ctx.amount) + '이 1일 이체한도를 넘어요.',
-          current: '1일 이체한도 ' + fmt(ctx.transferLimit),
-          action: '이체한도를 ' + fmt(ctx.amount) + ' 이상으로 변경해요.',
-          expected: '요청 금액을 보낼 수 있는 한도가 확보돼요.',
-          ruleIds: ['R01'],
-        };
-      case 'RETURN_TO_TRANSFER':
-        return {
-          problem: '원래 이체는 아직 실행되지 않았어요.',
-          current: '이체 정보 유지 중',
-          action: '받는 분과 금액을 확인한 뒤 직접 이체를 승인해요.',
-          expected: '은행이 처리 결과를 확인해 알려드려요.',
-          ruleIds: [],
-        };
-      default:
-        return { problem: '', current: '', action: '', expected: '', ruleIds: [] };
-    }
+      })
+      .sort((x, y) => (y.recommended ? 1 : 0) - (x.recommended ? 1 : 0) || (x.cost == null) - (y.cost == null) || x.cost - y.cost);
   }
 
   WSP.pathfinder = {
-    ACTIONS: ACTIONS,
     MAX_DEPTH: MAX_DEPTH,
+    FACT_KEYS: FACT_KEYS,
     getAction: getAction,
-    weightOf: weightOf,
+    availability: availability,
     buildStateGraph: buildStateGraph,
     dijkstra: dijkstra,
     findPath: findPath,
-    computePlan: computePlan,
-    planFromQueryFailure: planFromQueryFailure,
-    describeStep: describeStep,
+    detectCycle: detectCycle,
+    computeRoute: computeRoute,
+    alternativesFor: alternativesFor,
     getLastResult: () => lastResult,
-    setLastResult: (r) => {
-      lastResult = r;
-    },
+    setLastResult: (r) => (lastResult = r),
   };
 })();
