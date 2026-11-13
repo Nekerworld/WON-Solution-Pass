@@ -37,7 +37,7 @@
         '</h3><p>' +
         esc(p.summary) +
         '</p>' +
-        UI.kvRows([['금리', esc(p.rate)]]) +
+        UI.kvRows([[p.rateLabel || '금리', esc(p.rateValue || p.rate)]]) +
         '</div><button class="check-btn' +
         (d.input.agreed ? ' is-on' : '') +
         '" data-action="direct-agree"><span class="check-btn__box">' +
@@ -67,7 +67,7 @@
       const r = await bank.getAccountSummary();
       const acc = r.ok && r.data.account ? r.data.account : null;
       return (
-        '<div class="card"><span class="field__label">출금 계좌</span>' +
+        '<div class="card"><span class="field__label">' + (p.kind === 'BROKERAGE' ? '연결 원화 계좌' : '출금 계좌') + '</span>' +
         (acc
           ? '<div class="acct-pick is-on">' + I.wallet + '<span>' + esc(acc.name) + '<small>' + esc(acc.number) + '</small></span>' + I.check + '</div>'
           : '<div class="acct-pick is-empty">' + I.wallet + '<span>선택할 수 있는 우리은행 계좌가 없어요</span></div>') +
@@ -77,6 +77,8 @@
     if (step.id === 'info') return '<div class="card"><p>등록된 고객정보(직업·거래 목적)로 가입을 진행해요.</p></div>';
     if (step.id === 'identity') return '<div class="card"><p>실명확인된 정보로 본인을 확인해요.</p></div>';
     if (step.id === 'sign') return '<div class="card"><p>' + I.key + ' 우리 인증서로 가입 신청서에 전자서명해요.</p></div>';
+    if (step.id === 'fx') return '<div class="card"><p>외환거래 서비스에 등록된 외화(USD) 계좌를 연결해요.</p></div>';
+    if (step.id === 'profile') return '<div class="card"><p>등록된 투자성향으로 해외주식 거래 가능 여부를 확인해요.</p></div>';
     return '';
   }
 

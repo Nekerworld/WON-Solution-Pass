@@ -1,7 +1,8 @@
 /**
  * demoPanel.js
- * 발표자용 시연 제어 패널 (PC 전용, 앱 화면 바깥).
- * 실제 금융 앱의 기능이 아니며, 가상 은행 상태를 바꾸고 내부 상태를 관찰하는 도구다.
+ * 발표자용 시연 패널 (PC 전용, 앱 화면 바깥).
+ * 실제 금융 앱의 기능이 아니다. 고정된 통합 시나리오의 진행 과정과 내부 상태를 보여 준다.
+ * 은행 상태·응답 결과는 바꾸지 않는다 (모두 기본값).
  * 단축키: Shift + D (표시/숨김)
  */
 (function () {
@@ -10,62 +11,15 @@
   const WSP = window.WSP;
   const store = WSP.store;
   const SC = WSP.scenario;
-  const bank = WSP.mockBank;
   const events = WSP.events;
   const esc = WSP.ui.esc;
   const AA = WSP.assetAdvisor;
+  const DEMO = SC.DEMO;
 
   const root = document.getElementById('demo-panel');
   if (!root) return;
 
-  const PRESETS = [
-    { id: 'base', label: '기본 첫 거래', desc: '우리은행 첫 거래 고객. AI 대화에서 "신분증이 없어요"라고 답해 보세요.', apply: () => {} },
-    {
-      id: 'allmet',
-      label: '모두 충족',
-      desc: '가입 조건을 모두 갖춘 고객 → 바로 가입 준비 완료',
-      apply: (d) => Object.keys(d.facts).forEach((k) => (d.facts[k] = true)),
-    },
-    { id: 'cycle', label: '순환', desc: '다른 은행 계좌 없음. "없어요"라고 답하면 계좌↔인증서 순환 → 상담 연결', apply: (d) => (d.finance.otherBankAccounts = []) },
-    { id: 'delay', label: '처리 지연', desc: '다음 업무가 은행에서 처리 중 상태로 남음 → 결과 다시 확인', apply: (d) => (d.simulation.nextTaskOutcome = 'IN_PROGRESS') },
-    { id: 'mismatch', label: '완료 불일치 반복', desc: '업무 화면은 완료인데 은행 기록 미반영이 반복 → 2회 후 상담', apply: (d) => (d.simulation.nextTaskOutcome = 'MISMATCH_ALWAYS') },
-    { id: 'unknown', label: '결과 불명', desc: '가입 요청 결과가 확인되지 않음 → 재신청 없이 결과 조회만', apply: (d) => (d.simulation.nextApplicationOutcome = 'UNKNOWN') },
-    {
-      id: 'lowinfo',
-      label: '정보 부족',
-      desc: '소득·지출 미확인. 질문에 "잘 모르겠어요" → 제안 보류',
-      apply: (d) => {
-        d.finance.linked = ['가상 B카드'];
-        d.finance.notLinked = ['가상 A은행(급여)', '증권사', '보험사', '부동산·현금'];
-        d.finance.items.monthlyIncome = { value: null, source: 'UNKNOWN', basis: '급여 계좌 미연결' };
-        d.finance.items.monthlyExpense = { value: null, source: 'UNKNOWN', basis: '주 사용 계좌 미연결' };
-      },
-    },
-    { id: 'consultfail', label: '상담 접수 실패', desc: '상담 접수가 실패 → 요약 생성과 접수 완료 구분, 후속 안내', apply: (d) => (d.simulation.nextConsultOutcome = 'FAILED') },
-  ];
-
-  const FACT_SWITCHES = Object.keys(SC.FACTS).map((k) => [k, SC.FACTS[k].label, (s) => s.facts[k], (d, v) => (d.facts[k] = v)]);
-  const SYS_SWITCHES = [
-    ['bank', '은행 시스템 정상', (s) => s.system.bankAvailable, (d, v) => (d.system.bankAvailable = v)],
-    ['queryFailure', '조회 실패 주입', (s) => s.simulation.queryFailure, (d, v) => (d.simulation.queryFailure = v)],
-  ];
-  const SWITCHES = FACT_SWITCHES.concat(SYS_SWITCHES);
-
-  const TASK_OUTCOMES = [
-    ['NORMAL', '정상'],
-    ['ERROR', '오류'],
-    ['IN_PROGRESS', '처리 중'],
-    ['PARTIAL', '일부만'],
-    ['MISMATCH', '불일치 1회'],
-    ['MISMATCH_ALWAYS', '불일치 반복'],
-  ];
-  const APP_OUTCOMES = ['SUCCESS', 'FAILED', 'PENDING', 'UNKNOWN'];
-  const CONSULT_OUTCOMES = ['ACCEPTED', 'FAILED'];
-  const SPEEDS = [
-    [0.3, '빠르게'],
-    [1, '보통'],
-    [1.8, '느리게'],
-  ];
+  const PHASES = ['자산관리 상담', '상품 선택', '가입 지원', '가입 완료'];
 
   const TRACKS = [
     ['join', '가입 지원(AI)'],
@@ -84,6 +38,9 @@
     OPEN_ACCOUNT_CERT: '계좌(인증서)',
     ISSUE_CERT: '인증서',
     KYC_UPDATE: '고객정보',
+    FX_REGISTER: '외환신청',
+    OPEN_FX_ACCOUNT: '외화계좌',
+    INVESTOR_PROFILE: '투자성향',
   };
 
   root.innerHTML =
@@ -91,38 +48,21 @@
     '<button class="dp-btn dp-btn--danger" data-dp="reset">데모 초기화</button></div>' +
     '<div class="dp-body">' +
     '<div class="dp-col dp-col--controls">' +
-    '<div class="dp-section"><div class="dp-section__title">시나리오 프리셋 <span class="dp-tag">' +
+    '<div class="dp-section"><div class="dp-section__title">시나리오 <span class="dp-tag">' +
     esc(SC.POLICY.version) +
-    '</span></div><div class="dp-grid dp-grid--4">' +
-    PRESETS.map((p) => '<button class="dp-btn" data-dp="preset" data-id="' + p.id + '" title="' + esc(p.desc) + '">' + esc(p.label) + '</button>').join('') +
-    '</div><div class="dp-note" id="dp-preset-desc">프리셋은 데모를 초기화한 뒤 가상 은행 상태를 설정합니다.</div></div>' +
-    '<div class="dp-section"><div class="dp-section__title">은행 사실 (가입 조건)</div>' +
-    SWITCHES.map(
-      (s) =>
-        '<div class="dp-row"><label for="dp-sw-' +
-        s[0] +
-        '">' +
-        esc(s[1]) +
-        '</label><span class="dp-switch"><input type="checkbox" id="dp-sw-' +
-        s[0] +
-        '" data-dp-switch="' +
-        s[0] +
-        '"><span></span></span></div>'
-    ).join('') +
-    '</div>' +
-    '<div class="dp-section"><div class="dp-section__title">다음 결과 주입 (가상 은행 응답)</div>' +
-    '<div class="dp-sub">업무 화면</div><div class="dp-grid">' +
-    TASK_OUTCOMES.map((o) => '<button class="dp-btn" data-dp="task-outcome" data-v="' + o[0] + '">' + esc(o[1]) + '</button>').join('') +
-    '</div><div class="dp-sub">가입 요청</div><div class="dp-grid dp-grid--4">' +
-    APP_OUTCOMES.map((o) => '<button class="dp-btn" data-dp="app-outcome" data-v="' + o + '">' + o + '</button>').join('') +
-    '</div><div id="dp-pending"></div><div class="dp-sub">상담 접수</div><div class="dp-grid dp-grid--2">' +
-    CONSULT_OUTCOMES.map((o) => '<button class="dp-btn" data-dp="consult-outcome" data-v="' + o + '">' + o + '</button>').join('') +
-    '</div><div class="dp-sub">AI 출력</div><button class="dp-btn" data-dp="ai-invalid" style="width:100%">다음 AI 출력에 규칙 위반 주입 (검증 → 기본 선택지)</button></div>' +
-    '<div class="dp-section"><div class="dp-section__title">응답 속도</div><div class="dp-grid">' +
-    SPEEDS.map((s) => '<button class="dp-btn" data-dp="speed" data-v="' + s[0] + '">' + s[1] + '</button>').join('') +
-    '</div></div>' +
-    '<div class="dp-section"><div class="dp-section__title">AI vs 직접 가입 비교</div><div id="dp-compare"></div></div>' +
-    '<div class="dp-section"><div class="dp-section__title">자가 테스트 <button class="dp-btn dp-btn--primary" data-dp="selftest">실행</button></div><div class="dp-tests" id="dp-tests"><span class="dp-note">계획 7장 검증 항목을 브라우저 안에서 실행합니다. 실행 전 상태는 자동 복원됩니다.</span></div></div>' +
+    '</span></div><div class="dp-scn"><strong>' +
+    esc(DEMO.title) +
+    '</strong><div class="dp-scn__who">' +
+    esc(SC.initialBankState.customer.name) +
+    '(' +
+    SC.initialBankState.customer.age +
+    ') · ' +
+    DEMO.givens.map(esc).join(' · ') +
+    '</div><div class="dp-scn__ans">고객 답변: ' +
+    DEMO.customerAnswers.map((a) => esc(a[0]) + ' <b>' + esc(a[1]) + '</b>').join(' · ') +
+    '</div></div></div>' +
+    '<div class="dp-section"><div class="dp-section__title">진행 과정 <span class="dp-tag" id="dp-prog-count"></span></div><div id="dp-progress"></div></div>' +
+    '<div class="dp-section"><div class="dp-section__title">자가 테스트 <button class="dp-btn dp-btn--primary" data-dp="selftest">실행</button></div><div class="dp-tests" id="dp-tests"><span class="dp-note">검증 항목을 브라우저 안에서 실행합니다. 실행 전 상태는 자동 복원됩니다.</span></div></div>' +
     '</div>' +
     '<div class="dp-col dp-col--observe">' +
     '<div class="dp-section"><div class="dp-section__title">상태머신 <span id="dp-fsm-cur"></span></div>' +
@@ -142,36 +82,13 @@
   const $ = (sel) => root.querySelector(sel);
 
   /* ---------- 동작 ---------- */
-  function applyPreset(id) {
-    const p = PRESETS.find((x) => x.id === id);
-    if (!p) return;
-    WSP.app.resetDemo();
-    store.update((d) => p.apply(d), '[시연] 프리셋 ' + p.label + ' - ' + p.desc);
-    WSP.ui.rerender();
-    $('#dp-preset-desc').textContent = p.label + ': ' + p.desc;
-    WSP.ui.toast('시연 프리셋: ' + p.label);
-  }
-
   root.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-dp]');
     if (!b) return;
     const kind = b.dataset.dp;
     const v = b.dataset.v;
-    if (kind === 'reset') {
-      WSP.app.resetDemo();
-      $('#dp-preset-desc').textContent = '데모를 초기화했어요.';
-    } else if (kind === 'preset') applyPreset(b.dataset.id);
-    else if (kind === 'task-outcome') store.update((d) => (d.simulation.nextTaskOutcome = v), '[시연] 다음 업무 결과 → ' + v);
-    else if (kind === 'app-outcome') store.update((d) => (d.simulation.nextApplicationOutcome = v), '[시연] 다음 가입 결과 → ' + v);
-    else if (kind === 'consult-outcome') store.update((d) => (d.simulation.nextConsultOutcome = v), '[시연] 다음 상담 접수 결과 → ' + v);
-    else if (kind === 'ai-invalid') {
-      WSP.aiAgent.injectInvalidNext();
-      events.add('DEMO', '다음 AI 출력에 규칙 위반(가입 실행 도구·완료 단정) 주입');
-    } else if (kind === 'resolve') bank.demoResolveApplication(b.dataset.id, v);
-    else if (kind === 'speed') {
-      bank.setLatencyScale(Number(v));
-      events.add('DEMO', '응답 속도 배율 → ' + v);
-    } else if (kind === 'track') {
+    if (kind === 'reset') WSP.app.resetDemo();
+    else if (kind === 'track') {
       track = v;
       trackPinned = true;
     }
@@ -187,14 +104,6 @@
       }
     }
     scheduleSync();
-  });
-
-  root.addEventListener('change', (e) => {
-    const sw = e.target.closest('[data-dp-switch]');
-    if (!sw) return;
-    const def = SWITCHES.find((s) => s[0] === sw.dataset.dpSwitch);
-    const v = sw.checked;
-    store.update((d) => def[3](d, v), '[시연] ' + def[1] + ' → ' + (v ? 'ON' : 'OFF'));
   });
 
   function renderTests(report) {
@@ -373,24 +282,37 @@
     if (!last) return '<span class="dp-note">아직 계산된 경로가 없어요. AI 가입 지원을 시작하세요.</span>';
     if (!last.graph) return '<span class="dp-note">' + esc(last.status) + ': 상태 그래프를 만들지 않았어요.</span>';
     const g = last.graph;
-    const keys = Object.keys(SC.FACTS).filter((k) => new Set(g.nodes.map((n) => !!n.facts[k])).size > 1);
     const byDepth = [];
     g.nodes.forEach((n) => (byDepth[n.depth] = byDepth[n.depth] || []).push(n));
-    const cols = byDepth.length;
+    // 노드는 그 상태로 들어온 업무 이름으로 표시한다 (경로 위 간선 우선)
+    const inEdge = {};
+    g.edges.forEach((e) => {
+      if (!inEdge[e.to] || e.onPath) inEdge[e.to] = e;
+    });
+    const PER = 4;
+    const NW = 96;
+    const NH = 36;
+    const CG = 40;
+    const RG = 26;
     const rows = Math.max.apply(null, byDepth.map((c) => c.length));
-    const NW = Math.max(96, keys.length * 34 + 12);
-    const NH = 40;
-    const colGap = NW + 64;
-    const VW = Math.max(560, NW + colGap * (cols - 1) + 24);
-    const VH = rows * 60 + 30;
+    const blockH = rows * (NH + 14);
+    const blocks = Math.ceil(byDepth.length / PER);
+    const VW = PER * NW + (PER - 1) * CG + 24;
+    const VH = blocks * blockH + (blocks - 1) * RG + 12;
     const pos = {};
-    byDepth.forEach((col, d) => col.forEach((n, i) => (pos[n.key] = { x: 12 + NW / 2 + d * colGap, y: 18 + ((i + 0.5) * (VH - 30)) / col.length })));
+    byDepth.forEach((col, d) =>
+      col.forEach((n, i) => {
+        const bi = Math.floor(d / PER);
+        pos[n.key] = { x: 12 + NW / 2 + (d % PER) * (NW + CG), y: 6 + bi * (blockH + RG) + ((i + 0.5) * blockH) / col.length };
+      })
+    );
     const onPath = new Set([g.startKey]);
     g.edges.forEach((e) => e.onPath && onPath.add(e.to));
     let edges = '';
     let hl = '';
     g.edges.forEach((e) => {
-      const c = curve(pos[e.from], pos[e.to], NW, NH, e.onPath ? 0 : 10);
+      const wrap = pos[e.to].y - pos[e.from].y > blockH / 2;
+      const c = curve(pos[e.from], pos[e.to], NW, NH, e.onPath ? (wrap ? -20 : 0) : 12);
       const svg =
         '<path d="' +
         c.d +
@@ -403,24 +325,17 @@
         ' (weight ' +
         e.weight +
         (e.unknown ? ', 고객 제약 미확인' : '') +
-        ')</title></path><text x="' +
-        c.lx.toFixed(1) +
-        '" y="' +
-        (c.ly - 5).toFixed(1) +
-        '" class="g-elabel' +
-        (e.onPath ? ' is-hl' : '') +
-        '">' +
-        esc((ACTION_SHORT[e.actionId] || e.actionId) + '·' + e.weight) +
-        '</text>';
+        ')</title></path>';
       if (e.onPath) hl += svg;
       else edges += svg;
     });
     const nodes = g.nodes
       .map((n) => {
         const p = pos[n.key];
-        const facts = keys.map((k) => SC.FACTS[k].short + (n.facts[k] ? '✓' : '✗')).join(' ');
+        const e = inEdge[n.key];
+        const facts = n.key === g.startKey ? '현재' : e ? ACTION_SHORT[e.actionId] || e.actionId : '?';
         const cls = n.key === g.startKey ? ' is-start' : n.goal ? ' is-goal' : onPath.has(n.key) ? ' is-visited' : '';
-        const sub = n.key === g.startKey ? '현재 · d=0' : (n.goal ? '목표 · ' : '') + (n.dist == null ? '미탐색' : 'd=' + n.dist);
+        const sub = n.key === g.startKey ? 'd=0' : (n.goal ? '목표 · ' : '') + (n.dist == null ? '미탐색' : 'd=' + n.dist);
         return (
           '<g class="g-node' +
           cls +
@@ -536,7 +451,7 @@
 
   function aiHtml() {
     const tr = WSP.aiAgent.trace();
-    $('#dp-ai-count').textContent = tr.length + '건' + (WSP.aiAgent.isInjecting() ? ' · 위반 주입 대기' : '');
+    $('#dp-ai-count').textContent = tr.length + '건';
     if (!tr.length) return '<span class="dp-note">아직 AI 호출이 없어요.</span>';
     const list = tr
       .slice(-6)
@@ -595,33 +510,73 @@
     );
   }
 
-  function compareHtml() {
-    const s = WSP.app.session;
-    const j = s.join && s.join.metrics.endedAt ? s.join.metrics : s.lastMetrics.join;
-    const d = s.direct && s.direct.metrics.endedAt ? s.direct.metrics : s.lastMetrics.direct;
-    const curJ = s.join ? s.join.metrics : null;
-    const curD = s.direct ? s.direct.metrics : null;
-    const jm = j || curJ;
-    const dm = d || curD;
-    const sec = (m) => (m && m.endedAt ? Math.round((m.endedAt - m.startedAt) / 1000) + '초' : m ? '진행 중' : '-');
-    return (
-      '<table class="dp-table"><thead><tr><th></th><th>AI와 함께</th><th>직접 가입</th></tr></thead><tbody>' +
-      '<tr><td>고객 질문/입력 단계</td><td class="mono">' +
-      (jm ? jm.questions + '회 질문' : '-') +
-      '</td><td class="mono">' +
-      (dm ? dm.steps + '단계' : '-') +
-      '</td></tr><tr><td>업무 화면 이동</td><td class="mono">' +
-      (jm ? jm.tasks + '회(모달)' : '-') +
-      '</td><td class="mono">' +
-      (dm ? dm.menuVisits + '회(메뉴 탐색)' : '-') +
-      '</td></tr><tr><td>처음부터 다시</td><td class="mono">0</td><td class="mono">' +
-      (dm ? dm.restarts + '회' : '-') +
-      '</td></tr><tr><td>걸린 시간</td><td class="mono">' +
-      sec(jm) +
-      '</td><td class="mono">' +
-      sec(dm) +
-      '</td></tr></tbody></table><div class="dp-note">같은 고객 상태에서 두 방법을 각각 진행해 비교하세요. 시연 속도 기준이며 실제 소요 시간이 아니에요.</div>'
-    );
+  /* ---------- 진행 과정 ---------- */
+  function progressHtml(s) {
+    const f = WSP.app.fsms;
+    const sess = WSP.app.session;
+    const apps = Object.keys(s.applications)
+      .map((k) => s.applications[k])
+      .filter((a) => a.productId === DEMO.productId);
+    const opened = apps.some((a) => a.status === 'SUCCESS');
+    const joining =
+      (f.join.state !== 'IDLE' && sess.join && sess.join.productId === DEMO.productId) || (f.direct.state !== 'IDLE' && sess.direct && sess.direct.productId === DEMO.productId);
+    const phase = opened ? PHASES.length : joining ? 2 : ['EXPLORE', 'TO_JOIN', 'CLOSED'].indexOf(f.asset.state) !== -1 ? 1 : f.asset.state !== 'IDLE' ? 0 : -1;
+    const phaseHtml =
+      '<div class="dp-phase">' +
+      PHASES.map((p, i) => '<span class="' + (i < phase ? 'is-done' : i === phase ? 'is-cur' : '') + '">' + esc(p) + '</span>').join('<i>›</i>') +
+      '</div>';
+
+    let curFound = false;
+    let doneItems = 0;
+    let totalItems = 0;
+    const stages = DEMO.stages.map((st) => {
+      const items = st.facts.map((k) => ({ label: SC.FACTS[k].label, ok: s.facts[k] === true, pending: !!s.pending[k] }));
+      if (st.application) items.push({ label: SC.getProduct(st.application).name + ' 개설', ok: opened, pending: apps.some((a) => a.status === 'PENDING' || a.status === 'UNKNOWN') });
+      items.forEach((it) => {
+        totalItems += 1;
+        if (it.ok) doneItems += 1;
+      });
+      const all = items.every((it) => it.ok);
+      let cls = all ? 'is-done' : '';
+      if (!all && !curFound) {
+        curFound = true;
+        cls = 'is-cur';
+      }
+      return { label: st.label, items: items, cls: cls };
+    });
+    $('#dp-prog-count').textContent = doneItems + ' / ' + totalItems;
+
+    const stepper =
+      '<ol class="dp-stages">' +
+      stages.map((st, i) => '<li class="' + st.cls + '"><span>' + (st.cls === 'is-done' ? '✓' : i + 1) + '</span>' + esc(st.label) + '</li>').join('') +
+      '</ol>';
+    const detail =
+      '<div class="dp-stage-items">' +
+      stages
+        .map(
+          (st) =>
+            '<div class="dp-stage-row ' +
+            st.cls +
+            '"><b>' +
+            esc(st.label) +
+            '</b>' +
+            st.items.map((it) => '<span class="' + (it.ok ? 'ok' : it.pending ? 'wait' : '') + '">' + (it.ok ? '✓ ' : it.pending ? '… ' : '○ ') + esc(it.label) + '</span>').join('') +
+            '</div>'
+        )
+        .join('') +
+      '</div>';
+
+    const last = WSP.pathfinder.getLastResult();
+    let next = '';
+    if (opened) next = '해외주식 계좌 개설 완료 (은행 처리 결과로 확인)';
+    else if (f.join.state === 'READY_TO_APPLY') next = '고객 승인 대기: 가입 정보 확인 화면';
+    else if (f.join.state === 'CLARIFYING') next = '고객 답변 대기';
+    else if (joining && last && last.status === 'PLAN' && last.steps.length) next = '남은 업무 ' + last.steps.length + '개 · 다음: ' + last.steps[0].label;
+    else if (phase === 1) next = '고객이 상품을 고르면 가입 지원이 시작돼요';
+    else if (phase === 0) next = '자산관리 상담 진행 중';
+    else if (phase === -1) next = '홈에서 AI 자산관리 상담으로 시작';
+
+    return phaseHtml + stepper + detail + (next ? '<div class="dp-next">' + esc(next) + '</div>' : '');
   }
 
   /* ---------- 동기화 ---------- */
@@ -636,37 +591,9 @@
 
   function sync() {
     const s = store.getState();
-    SWITCHES.forEach((def) => {
-      const input = root.querySelector('[data-dp-switch="' + def[0] + '"]');
-      if (input) input.checked = !!def[2](s);
-    });
-    root.querySelectorAll('[data-dp="task-outcome"]').forEach((b) => b.classList.toggle('is-active', b.dataset.v === s.simulation.nextTaskOutcome));
-    root.querySelectorAll('[data-dp="app-outcome"]').forEach((b) => b.classList.toggle('is-active', b.dataset.v === s.simulation.nextApplicationOutcome));
-    root.querySelectorAll('[data-dp="consult-outcome"]').forEach((b) => b.classList.toggle('is-active', b.dataset.v === s.simulation.nextConsultOutcome));
-    root.querySelectorAll('[data-dp="speed"]').forEach((b) => b.classList.toggle('is-active', Number(b.dataset.v) === bank.getLatencyScale()));
     root.querySelectorAll('[data-dp="track"]').forEach((b) => b.classList.toggle('is-active', b.dataset.v === track));
     root.querySelector('[data-dp="exit-toggle"]').classList.toggle('is-active', showExit);
-    root.querySelector('[data-dp="ai-invalid"]').classList.toggle('is-active', WSP.aiAgent.isInjecting());
-
-    const open = Object.keys(s.applications)
-      .map((k) => s.applications[k])
-      .filter((a) => a.status === 'PENDING' || a.status === 'UNKNOWN');
-    $('#dp-pending').innerHTML = open.length
-      ? open
-          .map(
-            (a) =>
-              '<div class="dp-row"><span>' +
-              esc(a.id) +
-              ' · ' +
-              a.status +
-              '</span><span><button class="dp-btn" data-dp="resolve" data-id="' +
-              a.id +
-              '" data-v="SUCCESS">은행 확정 SUCCESS</button> <button class="dp-btn" data-dp="resolve" data-id="' +
-              a.id +
-              '" data-v="FAILED">FAILED</button></span></div>'
-          )
-          .join('') + '<div class="dp-note">은행 측 처리 확정을 시뮬레이션합니다. 앱에서 "결과 다시 조회"를 눌러야 반영돼요.</div>'
-      : '';
+    $('#dp-progress').innerHTML = progressHtml(s);
 
     const f = WSP.app.fsms[track];
     $('#dp-fsm-cur').innerHTML = '<span style="color:#7cc4ff;font-family:var(--mono)">' + f.state + '</span>';
@@ -690,7 +617,6 @@
     $('#dp-path').innerHTML = pathHtml(last);
     $('#dp-ai').innerHTML = aiHtml();
     $('#dp-info').innerHTML = infoHtml();
-    $('#dp-compare').innerHTML = compareHtml();
     $('#dp-ver').innerHTML = '<span style="font-family:var(--mono);color:#7cc4ff">v' + s.system.stateVersion + '</span>';
     $('#dp-json').textContent = JSON.stringify({ facts: s.facts, pending: s.pending, simulation: s.simulation, system: s.system, applications: s.applications, consultations: s.consultations }, null, 2);
     $('#dp-log').innerHTML = events

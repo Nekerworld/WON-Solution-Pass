@@ -617,12 +617,21 @@
     const ok = await UI().confirm({
       title: '가입을 승인할까요?',
       bodyHtml:
-        UI().kvRows([
-          ['상품', UI().esc(p.name)],
-          ['월 납입액', WSP.utils.formatMan(terms.monthly)],
-          ['가입 기간', terms.months + '개월'],
-          ['출금 계좌', UI().esc(terms.account)],
-        ]) + '<p class="fineprint">승인하시면 은행에 가입을 요청해요. 가입 완료는 은행 처리 결과로 확인해요.</p>',
+        UI().kvRows(
+          terms.market
+            ? [
+                ['상품', UI().esc(p.name)],
+                ['거래 시장', UI().esc(terms.market)],
+                ['연결 원화 계좌', UI().esc(terms.account)],
+                ['연결 외화 계좌', UI().esc(terms.fxAccount)],
+              ]
+            : [
+                ['상품', UI().esc(p.name)],
+                ['월 납입액', WSP.utils.formatMan(terms.monthly)],
+                ['가입 기간', terms.months + '개월'],
+                ['출금 계좌', UI().esc(terms.account)],
+              ]
+        ) + '<p class="fineprint">승인하시면 은행에 가입을 요청해요. 가입 완료는 은행 처리 결과로 확인해요.</p>',
       confirmText: '승인하고 가입 요청',
       cancelText: '취소',
     });
@@ -777,6 +786,15 @@
     },
     'join-approve'() {
       const el = UI().currentEl();
+      if (product().kind === 'BROKERAGE') {
+        const mk = el.querySelector('[data-field="market"] .is-on');
+        const terms = {
+          market: mk ? mk.dataset.value : product().markets[0],
+          account: el.querySelector('[data-field="account"]').dataset.value,
+          fxAccount: el.querySelector('[data-field="fxAccount"]').dataset.value,
+        };
+        return A().guard('join-approve', () => approve(terms));
+      }
       const monthly = Number(el.querySelector('[data-field="monthly"]').value.replace(/[^\d]/g, ''));
       const on = el.querySelector('[data-field="months"] .is-on');
       const months = on ? Number(on.dataset.value) : 0;

@@ -14,7 +14,7 @@
   const WSP = window.WSP;
   const SC = WSP.scenario;
 
-  const MAX_DEPTH = 7;
+  const MAX_DEPTH = 10;
   const FACT_KEYS = Object.keys(SC.FACTS);
 
   const ACTIONS = SC.TASKS;

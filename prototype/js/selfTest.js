@@ -71,8 +71,8 @@
   const af = () => WSP.app.fsms.asset;
 
   /** AI 가입 지원을 시작하고, 묻는 질문에는 answers(없으면 true)로 답한다 */
-  async function startJoin(answers) {
-    J().start(PID);
+  async function startJoin(answers, productId, ctx) {
+    J().start(productId || PID, ctx || null);
     await J().agree();
     const ans = answers || {};
     for (let i = 0; i < 5 && WSP.app.session.join && WSP.app.session.join.pendingKey; i++) {
@@ -236,6 +236,50 @@
     assert(jf().state === 'COMPLETED', '결과 ' + jf().state);
   });
 
+  t('통합 시나리오 상담: 해외주식 투자 상담 → 투자 방향 제안 → 해외주식 계좌로 연결', async () => {
+    fresh();
+    const F = WSP.assetFlow;
+    F.start();
+    F.agree();
+    await F.setGoal('해외주식 투자를 처음 시작해 보고 싶어요');
+    const a = WSP.app.session.asset;
+    assert(a.purpose === 'INVEST', '목적 ' + a.purpose);
+    let n = 0;
+    while (af().state === 'ASKING' && n < 4) {
+      const q = AA.QUESTIONS[a.pendingQuestion];
+      await F.answerChip(String(q.options[0][1]), q.options[0][0]);
+      n += 1;
+    }
+    assert(af().state === 'REVIEW' && a.proposal.level === 'FULL', '상태 ' + af().state + ' / ' + (a.proposal && a.proposal.level));
+    assert(a.proposal.basis.monthly === 490000, '월 투자 금액 ' + a.proposal.basis.monthly);
+    const prop = a.chat.filter((m) => m.kind === 'proposal').pop();
+    assert(prop && /원금 손실/.test(prop.text), '투자 위험 안내 없음');
+    await F.accept();
+    F.nextAction('explore');
+    assert(af().state === 'EXPLORE', '상태 ' + af().state);
+    const list = AA.matchProducts(a.handoffTerms);
+    assert(list.length === 1 && list[0].productId === SC.DEMO.productId, '추천 상품 ' + list.map((x) => x.productId));
+  });
+
+  t('통합 시나리오 가입: 신분증 없음 → 숨은 선행조건 7단계 → 투자성향은 주식계좌 직전 → 승인 → 개설', async () => {
+    fresh();
+    await startJoin({ hasIdCard: false, hasMobileId: true }, SC.DEMO.productId);
+    assert(WSP.app.session.join.questionsAsked === 2, '질문 ' + WSP.app.session.join.questionsAsked);
+    const order = [];
+    for (let i = 0; i < 10 && (jf().state === 'OPTIONS_READY' || jf().state === 'REMAINING'); i++) {
+      const next = WSP.app.session.join.route.steps[0].actionId;
+      order.push(next);
+      await doTask(next, true);
+    }
+    const expected = ['MOBILE_ID_VERIFY', 'OPEN_ACCOUNT_OTHERBANK', 'ISSUE_CERT', 'KYC_UPDATE', 'FX_REGISTER', 'OPEN_FX_ACCOUNT', 'INVESTOR_PROFILE'];
+    assert(order.join() === expected.join(), '업무 순서 ' + order.join(','));
+    assert(jf().state === 'READY_TO_APPLY', '준비 상태 ' + jf().state);
+    await J().approve({ market: '미국', account: 'WON 통장', fxAccount: 'WON 외화통장(USD)' });
+    assert(jf().state === 'COMPLETED', '결과 ' + jf().state);
+    const s = store.getState();
+    assert(SC.DEMO.stages.every((st) => st.facts.every((k) => s.facts[k] === true)), '진행 단계 사실 미충족');
+  });
+
   t('가입 결과 조회는 요청을 다시 보내지 않고, 같은 requestId는 중복 가입을 만들지 않음', async () => {
     fresh((d) => {
       Object.keys(d.facts).forEach((k) => (d.facts[k] = true));
@@ -364,14 +408,16 @@
   });
 
   t('같은 데이터로 AI 경로와 직접 가입의 조건 판정이 일치', async () => {
-    const keys = ['identityVerified', 'hasDepositAccount', 'certRegistered', 'kycDone'];
-    for (let mask = 0; mask < 16; mask++) {
-      fresh((d) => keys.forEach((k, i) => (d.facts[k] = !!(mask & (1 << i)))));
-      const c = await bank.checkConditions(PID);
-      const aiUnmet = RE.evaluate(PID, c).unmet.slice().sort();
-      const directUnmet = [];
-      SC.getProduct(PID).directSteps.forEach((st) => st.checks.forEach((id) => !c.data.conditions.find((x) => x.id === id).value && directUnmet.push(id)));
-      assert(aiUnmet.join() === directUnmet.sort().join(), 'mask ' + mask + ': ' + aiUnmet + ' / ' + directUnmet);
+    const keys = Object.keys(SC.FACTS).filter((k) => k !== 'adult');
+    for (const pid of [PID, SC.DEMO.productId]) {
+      for (let mask = 0; mask < 1 << keys.length; mask++) {
+        fresh((d) => keys.forEach((k, i) => (d.facts[k] = !!(mask & (1 << i)))));
+        const c = await bank.checkConditions(pid);
+        const aiUnmet = RE.evaluate(pid, c).unmet.slice().sort();
+        const directUnmet = [];
+        SC.getProduct(pid).directSteps.forEach((st) => st.checks.forEach((id) => !c.data.conditions.find((x) => x.id === id).value && directUnmet.push(id)));
+        assert(aiUnmet.join() === directUnmet.sort().join(), pid + ' mask ' + mask + ': ' + aiUnmet + ' / ' + directUnmet);
+      }
     }
   });
 

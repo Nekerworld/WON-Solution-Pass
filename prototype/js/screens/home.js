@@ -100,7 +100,7 @@
                     '<div><span>' +
                     esc(SC.getProduct(sv.productId).name) +
                     '</span><strong>' +
-                    (sv.terms && sv.terms.monthly ? '월 ' + man(sv.terms.monthly) : '가입') +
+                    (sv.terms && sv.terms.monthly ? '월 ' + man(sv.terms.monthly) : sv.terms && sv.terms.market ? sv.terms.market + ' 거래' : '가입') +
                     '</strong></div>'
                 )
                 .join('') +
@@ -158,7 +158,7 @@
         '<div class="entry-grid">' +
         '<button class="entry entry--asset" data-action="asset-start"><span class="entry__icon">' +
         I.target +
-        '</span><strong>AI 자산관리 상담</strong><span>목표에 맞춰 얼마씩 모을지 함께 정해요</span><em>상품 가입은 고객이 고른 뒤 따로 해요</em></button>' +
+        '</span><strong>AI 자산관리 상담</strong><span>모을 돈과 투자할 돈을 함께 정해요</span><em>상품 가입은 고객이 고른 뒤 따로 해요</em></button>' +
         '<button class="entry entry--product" data-action="go-products"><span class="entry__icon">' +
         I.product +
         '</span><strong>상품 가입</strong><span>상품을 고르고 AI와 함께 또는 직접 가입해요</span><em>자산 분석 없이 바로 시작할 수 있어요</em></button>' +
@@ -187,7 +187,7 @@
     render() {
       return (
         UI.appbar('상품') +
-        '<div class="screen-body"><p class="lead">예금·적금</p>' +
+        '<div class="screen-body"><p class="lead">투자·예금·적금</p>' +
         SC.PRODUCTS.map(
           (p) =>
             '<button class="product-card" data-action="open-product" data-product="' +
@@ -218,9 +218,10 @@
       const ctx = params.from === 'asset' && s.asset && s.asset.handoffTerms ? s.asset.handoffTerms : null;
       const joinActive = app().fsms.join.state !== 'IDLE' && s.join && s.join.productId === p.id;
       const directActive = app().fsms.direct.state !== 'IDLE' && s.direct && s.direct.productId === p.id;
-      const rows = [['상품 유형', esc(p.type)], ['금리', esc(p.rate)]];
+      const rows = [['상품 유형', esc(p.type)], [p.rateLabel || '금리', esc(p.rateValue || p.rate)]];
       if (p.periods.length) rows.push(['가입 기간', p.periods.map((m) => m + '개월').join(' · ')]);
       if (p.maxMonthly) rows.push(['월 납입', man(p.minMonthly) + ' ~ ' + man(p.maxMonthly)]);
+      if (p.markets) rows.push(['거래 시장', esc(p.markets.join(' · '))]);
       return (
         UI.appbar(p.name) +
         '<div class="screen-body">' +
@@ -228,7 +229,7 @@
           ? UI.notice(
               '<strong>자산관리 상담에서 정한 방향</strong><br>' +
                 esc(ctx.purpose) +
-                (ctx.monthly ? ' · 월 ' + man(ctx.monthly) : '') +
+                (ctx.monthly ? ' · 월 ' + man(ctx.monthly) + (p.kind === 'BROKERAGE' ? ' 투자' : '') : '') +
                 (ctx.months ? ' · ' + ctx.months + '개월' : '') +
                 '<br><span class="fineprint">상품을 고른 것은 가입이 아니에요. 아래에서 가입 방법을 고르면 가입 지원이 시작돼요.</span>',
               'info',
@@ -275,7 +276,7 @@
   });
 
   /* ---------- 전체 메뉴 (기존 업무 화면) ---------- */
-  const MENU_ORDER = ['실명확인', '계좌 개설', '인증센터', '내 정보 관리'];
+  const MENU_ORDER = ['실명확인', '계좌 개설', '인증센터', '내 정보 관리', '외환', '투자'];
 
   UI.registerScreen('menu', {
     title: '전체 메뉴',

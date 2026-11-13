@@ -18,7 +18,7 @@
   const SCREENS = ['direct', 'apply-result', 'menu', 'home'];
 
   /** 조건별로 고객이 찾아가야 하는 메뉴 (직접 가입 화면은 대체 수단까지 안내하지 않는다) */
-  const FIX_MENU = { IDENTITY: '실명확인', ACCOUNT: '계좌 개설', KYC: '내 정보 관리', CERT: '인증센터', ADULT: null };
+  const FIX_MENU = { IDENTITY: '실명확인', ACCOUNT: '계좌 개설', KYC: '내 정보 관리', CERT: '인증센터', FX: '외환', FX_ACCOUNT: '외환', PROFILE: '투자', ADULT: null };
 
   function fresh(productId) {
     const p = SC.getProduct(productId);
@@ -165,7 +165,7 @@
     const r = await bank.submitApplication({
       requestId: d.requestId,
       productId: d.productId,
-      terms: { monthly: d.input.monthly, months: d.input.months },
+      terms: p.kind === 'BROKERAGE' ? { market: p.markets[0] } : { monthly: d.input.monthly, months: d.input.months },
       channel: 'DIRECT',
     });
     if (stale(ep)) return;

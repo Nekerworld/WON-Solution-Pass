@@ -25,7 +25,7 @@
         UI.appbar('AI 자산관리 상담') +
         '<div class="screen-body"><div class="consent-hero"><span>' +
         I.target +
-        '</span><h2>목표에 맞춰<br>얼마씩 모을지 함께 정해요</h2><p>연결된 금융 정보와 고객님 답변으로 계산하고, 방향을 제안해요.</p></div>' +
+        '</span><h2>목표에 맞춰<br>모을 돈과 투자할 돈을 정해요</h2><p>연결된 금융 정보와 고객님 답변으로 계산하고, 방향을 제안해요.</p></div>' +
         '<div class="card"><h3 class="card__title">' +
         I.shield +
         '조회·분석 동의 (필수)</h3><ul class="consent-list">' +
@@ -75,7 +75,7 @@
     );
   }
 
-  const GOAL_CHIPS = ['2년 뒤 집 살 때 보탤 목돈을 모으고 싶어요', '결혼 자금 3천만원을 3년 안에 모으고 싶어요', '비상자금이 충분한지 알고 싶어요'];
+  const GOAL_CHIPS = ['해외주식 투자를 처음 시작해 보고 싶어요', '결혼 자금 3천만원을 3년 안에 모으고 싶어요', '비상자금이 충분한지 알고 싶어요'];
 
   function actionPanel(a) {
     const st = af().state;

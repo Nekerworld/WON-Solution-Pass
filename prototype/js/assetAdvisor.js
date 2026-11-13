@@ -27,6 +27,13 @@
   });
 
   const PURPOSES = Object.freeze({
+    INVEST: {
+      label: '해외주식 투자 시작',
+      critical: ['monthlyIncome', 'monthlyExpense', 'liquidAssets'],
+      important: ['investAssets', 'plannedLumpSum'],
+      minimum: ['monthlyIncome', 'monthlyExpense'],
+      tags: ['해외주식'],
+    },
     GOAL_SAVING: {
       label: '목돈 마련',
       critical: ['monthlyIncome', 'monthlyExpense', 'goalAmount', 'goalMonths'],
@@ -71,8 +78,8 @@
     plannedLumpSum: {
       id: 'Q_LUMP_SUM',
       key: 'plannedLumpSum',
-      text: '그 사이에 결혼·이사·경조사처럼 목돈이 나갈 일이 예정돼 있나요?',
-      why: '부채가 없어도 큰 지출이 예정돼 있으면 같은 기간에 모아야 할 금액이 달라져요.',
+      text: '앞으로 결혼·이사·경조사처럼 목돈이 나갈 일이 예정돼 있나요?',
+      why: '부채가 없어도 큰 지출이 예정돼 있으면 모으거나 투자할 수 있는 금액이 달라져요.',
       options: [
         ['없어요', 0],
         ['경조사 300만원 정도', 3000000],
@@ -99,6 +106,17 @@
         ['150만원 정도', 1500000],
         ['200만원 정도', 2000000],
         ['250만원 정도', 2500000],
+      ],
+    },
+    investAssets: {
+      id: 'Q_INVEST',
+      key: 'investAssets',
+      text: '지금 다른 증권사에서 투자하고 있는 돈이 있나요?',
+      why: '연결되지 않은 증권사 정보는 확인하지 못했어요. 이미 투자 중인 돈이 많으면 새로 투자할 금액을 줄여야 해요.',
+      options: [
+        ['없어요', 0],
+        ['500만원 정도', 5000000],
+        ['1천만원 이상', 10000000],
       ],
     },
     liquidAssets: {
@@ -206,6 +224,8 @@
     add('needMonthly', '필요 월 적립액', need, '(모아야 할 총액 − 목표에 쓸 예금) ÷ 목표 기간', ['goalAmount', 'plannedLumpSum', 'liquidAssets', 'goalMonths']);
     const capacity = surplus != null ? roundDown(Math.max(0, surplus) * 0.7) : null;
     add('capacity', '무리 없는 월 적립 여력', capacity, '월 여유자금 × 70%', ['monthlyIncome', 'monthlyExpense', 'debtPayment']);
+    const invest = capacity != null ? roundDown(capacity * 0.5) : null;
+    add('investMonthly', '월 투자 시작 금액', invest, '무리 없는 월 적립 여력 × 50%', ['monthlyIncome', 'monthlyExpense', 'debtPayment']);
     let rec = null;
     if (pref != null) rec = pref;
     else if (capacity != null) rec = need != null ? Math.min(need, capacity) : capacity;
@@ -267,11 +287,13 @@
       alternatives.push({ id: 'EMERGENCY_FIRST', label: '비상자금부터 채울게요', detail: '생활비 ' + SC.POLICY.emergencyMonths + '개월치가 기준인데, 지금은 ' + b.emergencyMonths.text + '치예요', apply: {} });
     }
     const uncertain = Object.keys(info.items).filter((k) => p.critical.concat(p.important).indexOf(k) !== -1 && (!known(info, k) || (info.items[k].source !== 'STATED' && info.items[k].source !== 'BANK')));
+    const invest = purposeId === 'INVEST';
     return {
+      purposeId: PURPOSES[purposeId] ? purposeId : 'GOAL_SAVING',
       purpose: p.label,
       tags: p.tags,
-      monthly: b.recommendedMonthly.value,
-      months: months,
+      monthly: invest ? b.investMonthly.value : b.recommendedMonthly.value,
+      months: invest ? null : months,
       feasible: metrics.feasible,
       alternatives: alternatives,
       uncertain: uncertain,
@@ -294,6 +316,11 @@
       return figs;
     }
     add('무리 없이 모을 수 있는 돈', b.capacity, '월 ' + b.capacity.text, '남는 돈의 70% 정도예요');
+    if (purposeId === 'INVEST') {
+      const low = b.emergencyMonths.value != null && b.emergencyMonths.value < SC.POLICY.emergencyMonths;
+      add('바로 쓸 수 있는 예금', b.emergencyMonths, '생활비 ' + b.emergencyMonths.text + '치', '생활비 ' + SC.POLICY.emergencyMonths + '개월치가 기준이에요', low ? 'warning' : '');
+      return figs;
+    }
     const short = b.needMonthly.value != null && b.capacity.value != null ? b.needMonthly.value - b.capacity.value : null;
     add('목표까지 매달 필요한 돈', b.needMonthly, '월 ' + b.needMonthly.text, short > 0 ? '여유보다 매달 ' + man(short) + ' 더 필요해요' : '', short > 0 ? 'warning' : '');
     return figs;
@@ -302,6 +329,11 @@
   function proposalFigures(basis, metrics) {
     if (basis.monthly == null) return [];
     const b = metrics.byKey;
+    if (basis.purposeId === 'INVEST') {
+      const inv = [{ label: '매달 투자할 돈', value: '월 ' + man(basis.monthly), note: '무리 없이 모을 수 있는 돈의 절반이에요', tone: '' }];
+      if (b.reserve.value != null) inv.push({ label: '예금으로 남길 돈', value: b.reserve.text, note: '생활비 ' + SC.POLICY.emergencyMonths + '개월치예요', tone: '' });
+      return inv;
+    }
     const figs = [{ label: '매달 모을 돈', value: '월 ' + man(basis.monthly), note: '', tone: '' }];
     if (basis.months) figs.push({ label: '모으는 기간', value: display('goalMonths', basis.months), note: '', tone: '' });
     if (b.expectedAmount.value != null) {
@@ -314,6 +346,7 @@
   /** 서비스 탐색: 상담 목적·기간에 맞는 상품. 선택은 고객이 한다. */
   function matchProducts(basis) {
     return SC.PRODUCTS.filter((p) => p.goalTags.some((t) => basis.tags.indexOf(t) !== -1)).map((p) => {
+      if (p.kind === 'BROKERAGE') return { productId: p.id, notes: [p.markets.join('·') + ' 주식 거래', '원화·외화 계좌 연결'], fit: true };
       const periodFit = basis.months && p.periods.length ? p.periods.indexOf(basis.months) !== -1 || p.periods.some((x) => x >= basis.months) : false;
       const amountFit = basis.monthly != null && p.maxMonthly ? basis.monthly <= p.maxMonthly : false;
       const notes = [];

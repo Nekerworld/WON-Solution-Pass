@@ -272,7 +272,7 @@
 
   function assetGoal(text) {
     return run('상담 목적 이해', { text: text }, { infoKeys: ['goalMonths', 'goalAmount'] }, () => {
-      const purpose = /비상|급할\s?때|예비/.test(text) ? 'EMERGENCY' : 'GOAL_SAVING';
+      const purpose = /주식|투자|해외|미국|증권/.test(text) ? 'INVEST' : /비상|급할\s?때|예비/.test(text) ? 'EMERGENCY' : 'GOAL_SAVING';
       const actions = [];
       const months = parseMonths(text);
       const amount = parseAmount(text);
@@ -320,7 +320,7 @@
       if (/말하기\s?싫|답하고\s?싶지|비밀|안\s?알려/.test(text)) return { intent: 'REFUSED', message: REFUSED_REPLY, actions: [{ type: 'HOLD', reason: 'REFUSED' }] };
       if (!q) return { intent: 'UNCLEAR', message: '말씀을 정확히 이해하지 못했어요.', actions: [{ type: 'EXPLAIN', text: 'unclear' }] };
       let value = AA().ITEMS[q.key].kind === 'months' ? parseMonths(text) : parseAmount(text);
-      if (value == null && q.key === 'plannedLumpSum' && /없/.test(text)) value = 0;
+      if (value == null && (q.key === 'plannedLumpSum' || q.key === 'investAssets') && /없/.test(text)) value = 0;
       if (value == null) return { intent: 'UNCLEAR', message: '금액이나 기간을 알아듣지 못했어요. 아래 버튼으로 골라 주셔도 돼요.', actions: [{ type: 'EXPLAIN', text: 'unclear' }] };
       return {
         intent: 'SET_INFO',
@@ -358,7 +358,11 @@
       const b = metrics.byKey;
       let text;
       if (basis.monthly == null) text = '지금 정보로는 월 적립액을 계산하기 어려워요.';
-      else {
+      else if (basis.purposeId === 'INVEST') {
+        text =
+          (b.reserve.value != null ? '생활비 ' + SC.POLICY.emergencyMonths + '개월치인 ' + josa(b.reserve.text, '은') + ' 예금으로 남겨 두고, ' : '') +
+          '매달 ' + man(basis.monthly) + ' 정도로 해외주식 투자를 시작해 보시는 걸 제안해요. 투자는 원금 손실이 날 수 있어서, 무리 없이 모을 수 있는 돈의 절반만 잡았어요.';
+      } else {
         text = '매달 ' + man(basis.monthly) + '씩' + (basis.months ? ' ' + AA().display('goalMonths', basis.months) + ' 동안' : '') + ' 모아 보시는 걸 제안해요.';
         if (b.expectedAmount.value != null) text += ' 기간이 끝나면 약 ' + josa(man(b.expectedAmount.value), '이') + ' 모여요.';
         if (basis.feasible === false) text += ' 목표인 ' + b.target.text + '에는 못 미쳐서, 바꿀 수 있는 방법도 함께 보여 드릴게요.';

@@ -62,6 +62,7 @@
     plus: svg('<path d="M12 5v14M5 12h14"/>'),
     target: svg('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>'),
     doc: svg('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>'),
+    globe: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.7 5.6 3.7 9s-1.2 6.4-3.7 9c-2.5-2.6-3.7-5.6-3.7-9S9.5 5.6 12 3z"/>'),
     route: svg('<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/>'),
     homeFill:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.6L12 3.5l8.5 7.1V20a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z" fill="currentColor"/></svg>',
@@ -72,7 +73,7 @@
   };
 
   /** 업무 아이콘 이름 → 아이콘 */
-  const TASK_ICON = { idcard: I.idcard, phone: I.phone, wallet: I.wallet, key: I.key, user: I.user };
+  const TASK_ICON = { idcard: I.idcard, phone: I.phone, wallet: I.wallet, key: I.key, user: I.user, globe: I.globe, chart: I.stock };
 
   /* ==================================================================
    * 공용 템플릿 조각

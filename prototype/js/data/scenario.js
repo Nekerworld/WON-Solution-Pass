@@ -29,6 +29,9 @@
     hasDepositAccount: { label: '우리은행 입출금 계좌', short: '계좌' },
     certRegistered: { label: '우리 인증서', short: '인증서' },
     kycDone: { label: '고객정보 확인', short: '고객정보' },
+    fxRegistered: { label: '외환거래 서비스 신청', short: '외환' },
+    hasFxAccount: { label: '외화 입출금 계좌', short: '외화계좌' },
+    investorProfiled: { label: '투자성향 진단', short: '투자성향' },
   });
 
   /** 상품 가입 조건. blocker: 앱 안에서 해결할 업무가 없는 조건 */
@@ -38,6 +41,9 @@
     ACCOUNT: { fact: 'hasDepositAccount', label: '납입용 우리은행 입출금 계좌', evidence: '보유 계좌 목록' },
     KYC: { fact: 'kycDone', label: '고객정보(직업·거래 목적) 확인', evidence: '고객정보 등록 기록' },
     CERT: { fact: 'certRegistered', label: '전자서명용 우리 인증서', evidence: '인증서 등록 기록' },
+    FX: { fact: 'fxRegistered', label: '외환거래 서비스 신청', evidence: '외환거래 약정 기록' },
+    FX_ACCOUNT: { fact: 'hasFxAccount', label: '외화(USD) 입출금 계좌', evidence: '보유 외화 계좌 목록' },
+    PROFILE: { fact: 'investorProfiled', label: '투자성향 진단 완료', evidence: '투자자 정보 확인 기록' },
   });
 
   /** 고객 제약: 은행 데이터로 알 수 없어 고객에게 확인해야 하는 사정 */
@@ -124,23 +130,95 @@
       label: '고객정보 확인 (직업·거래 목적)',
       menu: '내 정보 관리',
       icon: 'user',
-      pre: { hasDepositAccount: true },
+      pre: { hasDepositAccount: true, certRegistered: true },
       needs: {},
       effects: { kycDone: true },
       weight: 1,
       minutes: 1,
-      prep: [],
+      prep: ['우리 인증서'],
       steps: ['직업 정보 저장', '거래 목적 저장', '고객정보 확인 결과 수신'],
       fields: [
         { id: 'job', label: '직업', options: ['회사원', '공무원', '자영업', '프리랜서', '학생', '기타'] },
-        { id: 'purpose', label: '거래 목적', options: ['저축·자산 형성', '급여 수령', '생활비 관리', '기타'] },
+        { id: 'purpose', label: '거래 목적', options: ['저축·자산 형성', '해외주식 투자', '급여 수령', '생활비 관리', '기타'] },
       ],
-      desc: '금융거래를 위해 직업과 거래 목적을 확인해요.',
+      desc: '금융거래를 위해 직업과 거래 목적을 확인해요. 인증서로 본인 확인 후 저장해요.',
+    },
+    {
+      id: 'FX_REGISTER',
+      label: '외환거래 서비스 신청',
+      menu: '외환',
+      icon: 'globe',
+      pre: { certRegistered: true, kycDone: true },
+      needs: {},
+      effects: { fxRegistered: true },
+      weight: 2,
+      minutes: 2,
+      prep: ['우리 인증서'],
+      steps: ['외환거래 약관 확인', '인증서 전자서명', '외환거래 등록 결과 수신'],
+      desc: '외화를 사고팔고 외화 계좌를 쓰려면 외환거래 서비스를 먼저 신청해야 해요.',
+    },
+    {
+      id: 'OPEN_FX_ACCOUNT',
+      label: '외화(USD) 입출금 계좌 개설',
+      menu: '외환',
+      icon: 'globe',
+      pre: { fxRegistered: true, hasDepositAccount: true },
+      needs: {},
+      effects: { hasFxAccount: true },
+      weight: 2,
+      minutes: 2,
+      prep: ['우리은행 입출금 계좌'],
+      steps: ['통화 선택(USD)', '원화 계좌 연결', '외화 계좌 개설 결과 수신'],
+      desc: '해외주식을 사고팔 때 달러를 넣어 두는 외화 계좌를 만들어요.',
+    },
+    {
+      id: 'INVESTOR_PROFILE',
+      label: '투자성향 진단',
+      menu: '투자',
+      icon: 'chart',
+      pre: { kycDone: true, hasFxAccount: true },
+      needs: {},
+      effects: { investorProfiled: true },
+      weight: 2,
+      minutes: 3,
+      prep: [],
+      steps: ['투자 경험 확인', '감당할 수 있는 손실 확인', '투자성향 결과 수신'],
+      fields: [
+        { id: 'experience', label: '투자 경험', options: ['없어요', '1년 미만', '1~3년', '3년 이상'] },
+        { id: 'loss', label: '감당할 수 있는 손실', options: ['원금은 지키고 싶어요', '10% 이내', '20% 이내', '그 이상도 괜찮아요'] },
+      ],
+      desc: '해외주식 계좌를 열기 전에 투자 경험과 감당할 수 있는 손실을 확인해요.',
     },
   ]);
 
   /** 상품 */
   const PRODUCTS = Object.freeze([
+    {
+      id: 'OVERSEAS_STOCK',
+      name: 'WON 해외주식 계좌',
+      type: '해외주식',
+      /** BROKERAGE: 납입액·기간 대신 거래 시장과 연결 계좌를 정한다 */
+      kind: 'BROKERAGE',
+      rate: '수수료 0.25%',
+      rateLabel: '매매 수수료',
+      rateValue: '0.25%',
+      summary: '미국 등 해외 주식을 사고팔 수 있는 투자 계좌 (증권사 연계)',
+      goalTags: ['해외주식'],
+      periods: [],
+      minMonthly: 0,
+      maxMonthly: 0,
+      markets: ['미국', '홍콩', '일본'],
+      conditions: ['ADULT', 'IDENTITY', 'ACCOUNT', 'CERT', 'KYC', 'FX', 'FX_ACCOUNT', 'PROFILE'],
+      directSteps: [
+        { id: 'terms', label: '상품 안내·약관 동의', checks: [] },
+        { id: 'identity', label: '본인 확인', checks: ['ADULT', 'IDENTITY'] },
+        { id: 'account', label: '연결 원화 계좌 선택', checks: ['ACCOUNT'] },
+        { id: 'sign', label: '인증서 확인', checks: ['CERT'] },
+        { id: 'info', label: '고객정보 확인', checks: ['KYC'] },
+        { id: 'fx', label: '외화 계좌 연결', checks: ['FX', 'FX_ACCOUNT'] },
+        { id: 'profile', label: '투자성향 확인', checks: ['PROFILE'] },
+      ],
+    },
     {
       id: 'SAVINGS_GOAL',
       name: 'WON 목돈마련 적금',
@@ -213,6 +291,9 @@
       hasDepositAccount: false,
       certRegistered: false,
       kycDone: false,
+      fxRegistered: false,
+      hasFxAccount: false,
+      investorProfiled: false,
     },
     /** 처리 중인 업무: fact -> { sessionId, queriesLeft } */
     pending: {},
@@ -245,6 +326,24 @@
     system: { bankAvailable: true, stateVersion: 1 },
   });
 
+  /** 발표용 통합 시나리오: 처음 거래하는 고객의 해외주식 계좌 개설 */
+  const DEMO = Object.freeze({
+    title: '처음 거래하는 고객의 해외주식 계좌 개설',
+    productId: 'OVERSEAS_STOCK',
+    customerAnswers: [
+      ['실물 신분증', '없음'],
+      ['모바일 신분증', '있음'],
+    ],
+    givens: ['우리은행 계좌·인증서 없음', '다른 은행 계좌 있음(마이데이터 연결)', '고객정보·투자성향 미등록'],
+    stages: [
+      { id: 'ACCOUNT', label: '계좌 개설', facts: ['identityVerified', 'hasDepositAccount'] },
+      { id: 'AUTH', label: '인증', facts: ['certRegistered', 'kycDone'] },
+      { id: 'FX', label: '외환거래', facts: ['fxRegistered'] },
+      { id: 'FX_ACCOUNT', label: '해외계좌', facts: ['hasFxAccount'] },
+      { id: 'STOCK', label: '주식계좌', facts: ['investorProfiled'], application: 'OVERSEAS_STOCK' },
+    ],
+  });
+
   function getTask(id) {
     return TASKS.find((t) => t.id === id) || null;
   }
@@ -260,10 +359,11 @@
     TASKS: TASKS,
     PRODUCTS: PRODUCTS,
     SOURCE_LABEL: SOURCE_LABEL,
+    DEMO: DEMO,
     initialBankState: initialBankState,
     getTask: getTask,
     getProduct: getProduct,
   };
 
-  WSP.store = WSP.createStore(initialBankState, { storageKey: 'wsp.bankState.v2' });
+  WSP.store = WSP.createStore(initialBankState, { storageKey: 'wsp.bankState.v3' });
 })();

@@ -227,15 +227,49 @@
       const acc = await bank.getAccountSummary();
       if (!acc.ok) return UI.queryErrorCard('가입 정보 확인', acc.error);
       const ctx = j.assetContext;
-      const months = Number(params.months) || (ctx && p.periods.indexOf(ctx.months) !== -1 ? ctx.months : p.periods.indexOf(24) !== -1 ? 24 : p.periods[0]);
-      const monthly = (j.terms && j.terms.monthly) || (ctx && ctx.monthly) || 300000;
       const account = acc.data.account ? acc.data.account.name + ' ' + acc.data.account.number : '계좌 없음';
       const ev = j.evaluation;
-      return (
+      const head =
         UI.appbar('가입 정보 확인') +
         '<div class="screen-body">' +
         UI.notice('<strong>가입 준비 완료는 가입 완료가 아니에요.</strong><br>내용을 확인하고 승인하시면 그때 은행에 가입을 요청해요.', 'info', I.info) +
-        (j.applyNotice ? UI.notice(esc(j.applyNotice.text), j.applyNotice.tone || 'warning', I.alert) : '') +
+        (j.applyNotice ? UI.notice(esc(j.applyNotice.text), j.applyNotice.tone || 'warning', I.alert) : '');
+      const tail =
+        '<div class="card card--outline"><h3 class="card__title">' +
+        I.shield +
+        '은행 기록으로 확인한 가입 조건</h3><ul class="cond-list">' +
+        (ev ? ev.conditions.map((c) => '<li>' + I.check + esc(c.label) + '</li>').join('') : '') +
+        '</ul>' +
+        '<p class="fineprint">승인하면 은행이 조건을 한 번 더 확인해요.</p>' +
+        '</div></div>' +
+        '<div class="screen-footer"><button class="btn btn--primary btn--block btn--lg" data-action="join-approve">가입 승인</button></div>';
+      const staticField = (label, field, value) =>
+        '<div class="field"><span class="field__label">' + label + '</span><div class="text-input is-static" data-field="' + field + '" data-value="' + esc(value) + '">' + esc(value) + '</div></div>';
+
+      if (p.kind === 'BROKERAGE') {
+        const market = params.market || (j.terms && j.terms.market) || p.markets[0];
+        return (
+          head +
+          (ctx && ctx.monthly ? UI.notice('자산관리 상담에서 정한 방향은 월 ' + man(ctx.monthly) + ' 투자예요. 실제 주문은 계좌를 연 뒤 고객님이 직접 해요.', 'neutral', I.target) : '') +
+          '<div class="card"><h3 class="card__title">' +
+          esc(p.name) +
+          '</h3>' +
+          UI.kvRows([[p.rateLabel, esc(p.rateValue)]]) +
+          '</div>' +
+          '<div class="card"><div class="field"><span class="field__label">거래 시장</span><div class="chip-row" data-field="market">' +
+          p.markets.map((m) => '<button class="chip' + (m === market ? ' is-on' : '') + '" data-action="apply-market" data-value="' + esc(m) + '">' + esc(m) + '</button>').join('') +
+          '</div></div>' +
+          staticField('연결 원화 계좌', 'account', account) +
+          staticField('연결 외화 계좌', 'fxAccount', 'WON 외화통장(USD) 1002-***-552190') +
+          '</div>' +
+          tail
+        );
+      }
+
+      const months = Number(params.months) || (ctx && p.periods.indexOf(ctx.months) !== -1 ? ctx.months : p.periods.indexOf(24) !== -1 ? 24 : p.periods[0]);
+      const monthly = (j.terms && j.terms.monthly) || (ctx && ctx.monthly) || 300000;
+      return (
+        head +
         (ctx ? UI.notice('자산관리 상담에서 정한 방향(월 ' + man(ctx.monthly || 0) + ' · ' + (ctx.months || '-') + '개월)을 기본값으로 넣었어요. 바꿔도 돼요.', 'neutral', I.target) : '') +
         '<div class="card"><h3 class="card__title">' +
         esc(p.name) +
@@ -252,19 +286,9 @@
         '<div class="field"><span class="field__label">가입 기간</span><div class="chip-row" data-field="months">' +
         p.periods.map((m) => '<button class="chip' + (m === months ? ' is-on' : '') + '" data-action="apply-months" data-value="' + m + '">' + m + '개월</button>').join('') +
         '</div></div>' +
-        '<div class="field"><span class="field__label">출금 계좌</span><div class="text-input is-static" data-field="account" data-value="' +
-        esc(account) +
-        '">' +
-        esc(account) +
-        '</div></div></div>' +
-        '<div class="card card--outline"><h3 class="card__title">' +
-        I.shield +
-        '은행 기록으로 확인한 가입 조건</h3><ul class="cond-list">' +
-        (ev ? ev.conditions.map((c) => '<li>' + I.check + esc(c.label) + '</li>').join('') : '') +
-        '</ul>' +
-        '<p class="fineprint">승인하면 은행이 조건을 한 번 더 확인해요.</p>' +
-        '</div></div>' +
-        '<div class="screen-footer"><button class="btn btn--primary btn--block btn--lg" data-action="join-approve">가입 승인</button></div>'
+        staticField('출금 계좌', 'account', account) +
+        '</div>' +
+        tail
       );
     },
   });
@@ -283,6 +307,7 @@
     const rows = [['상품', esc(p.name)]];
     if (terms && terms.monthly) rows.push(['월 납입액', man(terms.monthly)]);
     if (terms && terms.months) rows.push(['가입 기간', terms.months + '개월']);
+    if (terms && terms.market) rows.push(['거래 시장', esc(terms.market)]);
     if (d.requestId) rows.push(['요청 번호', '<code>' + esc(d.requestId) + '</code>']);
 
     if (['APPLYING', 'VERIFYING', 'D_VERIFYING'].indexOf(st) !== -1) {
@@ -496,6 +521,9 @@
   WSP.registerActions({
     'apply-months'(d) {
       UI.rerender({ months: Number(d.value) });
+    },
+    'apply-market'(d) {
+      UI.rerender({ market: d.value });
     },
     'support-consent'(d, el, e) {
       const c = supportCtx(d.track);

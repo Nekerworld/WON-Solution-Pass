@@ -11,7 +11,7 @@
 
   const WSP = window.WSP;
   const storage = WSP.utils.safeStorage();
-  const SESSION_KEY = 'wsp.session.v2';
+  const SESSION_KEY = 'wsp.session.v3';
 
   const fsms = {
     join: WSP.createFSM('join'),
