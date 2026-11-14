@@ -9,7 +9,7 @@ import 'key_value_storage.dart';
 /// 중앙 상태 저장소: 모든 화면/모듈이 같은 저장소를 참조한다.
 /// 모든 값은 시연용 가상 데이터이며 실제 은행 시스템/정책과 무관하다.
 class BankStore extends ChangeNotifier {
-  BankStore({required this.events, this.storage, this.storageKey = 'wsp.bankState.v1'}) {
+  BankStore({required this.events, this.storage, this.storageKey = 'wsp.bankState.v3'}) {
     _state = _load() ?? BankState.initial();
   }
 

@@ -168,6 +168,52 @@ abstract final class AppIcons {
   ]);
 
   static final play = SvgArt([_p('M7 4.5v15l12.5-7.5z', fill: Pigment.current, stroke: null)]);
+  static final target = SvgArt([_c(12, 12, 9), _c(12, 12, 5), _c(12, 12, 1.5)]);
+  static final doc = SvgArt([_p('M6 3h8l4 4v14H6z'), _p('M14 3v4h4M9 12h6M9 16h6')]);
+  static final globe = SvgArt([_c(12, 12, 9), _p('M3 12h18M12 3c2.5 2.6 3.7 5.6 3.7 9s-1.2 6.4-3.7 9c-2.5-2.6-3.7-5.6-3.7-9S9.5 5.6 12 3z')]);
+  static final cart = SvgArt([_p('M3 4h2l2.2 10.5a1 1 0 0 0 1 .8h9.4a1 1 0 0 0 1-.8L20 8H6.2'), _c(9, 19.5, 1.3), _c(17, 19.5, 1.3)]);
+  static final heart = SvgArt([_p('M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z')]);
+  static final down = SvgArt([_p('M6 9l6 6 6-6')]);
+  static final msg = SvgArt([_p('M4 5h16v11H9l-5 4z')]);
+  static final eye = SvgArt([_p('M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z'), _c(12, 12, 3)]);
+  static final route = SvgArt([_c(6, 18, 2.5), _c(18, 6, 2.5), _p('M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5')]);
+  static final grid = SvgArt([_r(4, 4, 6, 6, 1), _r(14, 4, 6, 6, 1), _r(4, 14, 6, 6, 1), _r(14, 14, 6, 6, 1)]);
+
+  /// 챗봇 아바타: 단순한 말풍선 얼굴 (자체 제작)
+  static final botFace = SvgArt(
+    [
+      _r(5, 9, 22, 17, 8, fill: _hex(0xFFE8F1FE), stroke: _hex(0xFF2488F3), sw: 1.6),
+      _c(12.5, 17.5, 1.8, fill: _hex(0xFF2488F3), stroke: null),
+      _c(19.5, 17.5, 1.8, fill: _hex(0xFF2488F3), stroke: null),
+      _p('M16 9V5.5', stroke: _hex(0xFF2488F3), sw: 1.6),
+      _c(16, 4.5, 1.6, fill: _hex(0xFF2488F3), stroke: null),
+    ],
+    width: 32,
+    height: 32,
+  );
+
+  /// 은행 계좌 표시 (자체 제작 물결)
+  static final bankMark = SvgArt(
+    [
+      _c(16, 16, 15, fill: _hex(0xFFE8F1FE), stroke: null),
+      _p('M8 18.5c2.6-3.2 5.4-3.2 8 0s5.4 3.2 8 0', stroke: _hex(0xFF2488F3), sw: 2.4),
+      _p('M8 13.5c2.6-3.2 5.4-3.2 8 0s5.4 3.2 8 0', stroke: _hex(0xFF5AA8F7), sw: 2.4),
+    ],
+    width: 32,
+    height: 32,
+  );
+
+  /// 업무 아이콘 이름 → 아이콘
+  static SvgArt task(String name) => switch (name) {
+        'idcard' => idcard,
+        'phone' => phone,
+        'wallet' => wallet,
+        'key' => key,
+        'user' => user,
+        'globe' => globe,
+        'chart' => stock,
+        _ => doc,
+      };
 
   /// 하단 탭 '상품' (가방)
   static final bag = SvgArt([_r(4, 4, 16, 17, 3.5), _p('M9 4v2.5a3 3 0 0 0 6 0V4')]);

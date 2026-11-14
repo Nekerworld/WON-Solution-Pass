@@ -2,10 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../domain/bank_types.dart';
-import '../domain/bank_state.dart';
-
 enum UiTone { neutral, info, success, warning, danger }
+
+UiTone toneOf(String? s) => switch (s) {
+      'info' => UiTone.info,
+      'success' => UiTone.success,
+      'warning' => UiTone.warning,
+      'danger' => UiTone.danger,
+      _ => UiTone.neutral,
+    };
 
 class ToastMessage {
   ToastMessage({required this.id, required this.text, required this.tone});
@@ -17,41 +22,25 @@ class ToastMessage {
 
 /// 하단 시트 공통
 abstract class SheetState extends ChangeNotifier {
-  bool dismissible = false;
+  bool dismissible = true;
   VoidCallback? onClose;
-
-  void setDismissible(bool value) {
-    dismissible = value;
-    notifyListeners();
-  }
 }
 
-class DiagSummary {
-  const DiagSummary({required this.tone, required this.title, required this.body, required this.buttonLabel});
+/// 상품 상세의 가입 방법 선택 (AI와 함께 / 직접 가입)
+class JoinMethodSheet extends SheetState {
+  JoinMethodSheet({required this.productId, required this.from, required this.joinActive, required this.directActive});
 
-  final UiTone tone;
-  final String title;
-  final String body;
-  final String buttonLabel;
+  final String productId;
+  final String? from;
+  final bool joinActive;
+  final bool directActive;
 }
 
-/// 이체 실패 뒤 하단 모달. 조회 과정은 보여 주지 않고, 결과와 다음 화면으로 가는 버튼만 둔다.
-class DiagnosisSheetState extends SheetState {
-  DiagSummary? summary;
+/// 자산관리 상담의 정보 고치기
+class AssetEditSheet extends SheetState {
+  AssetEditSheet({required this.itemKey});
 
-  void showSummary(DiagSummary value) {
-    summary = value;
-    notifyListeners();
-  }
-}
-
-class AccountSheetState extends SheetState {
-  AccountSheetState({required this.customer, required this.transactions}) {
-    dismissible = true;
-  }
-
-  final CustomerSnapshot customer;
-  final List<Transaction> transactions;
+  final String itemKey;
 }
 
 class ConfirmRow {
@@ -63,22 +52,25 @@ class ConfirmRow {
 }
 
 /// 확인 모달. 사용자가 버튼을 눌러야만 완료된다.
+/// [paragraphs]의 **굵게** 표시는 굵은 글씨로 그린다.
 class ConfirmRequest {
   ConfirmRequest({
     required this.title,
-    this.body,
+    this.paragraphs = const [],
     this.rows = const [],
     this.fineprint,
     this.confirmText = '확인',
     this.cancelText = '취소',
+    this.danger = false,
   });
 
   final String title;
-  final String? body;
+  final List<String> paragraphs;
   final List<ConfirmRow> rows;
   final String? fineprint;
   final String confirmText;
   final String cancelText;
+  final bool danger;
   final Completer<bool> completer = Completer<bool>();
 
   void resolve(bool value) {
@@ -86,36 +78,37 @@ class ConfirmRequest {
   }
 }
 
-/// OTP 등록·고객확인 처리 중 단계 표시
-class ProgressAnim extends ChangeNotifier {
-  ProgressAnim({required this.total, required this.sleep, int tickMs = 280}) {
-    _timer = Timer.periodic(Duration(milliseconds: tickMs), (_) {
-      if (done < total - 1) {
-        done++;
-        notifyListeners();
-      }
-    });
-  }
+/// 업무 모달의 결과 표시 (tone, 제목)
+const Map<String, (UiTone, String)> taskModalStatus = {
+  'COMPLETED': (UiTone.success, '업무 화면에서 완료됐어요'),
+  'IN_PROGRESS': (UiTone.warning, '은행에서 처리 중이에요'),
+  'PARTIAL': (UiTone.warning, '일부 단계만 저장됐어요'),
+  'ERROR': (UiTone.danger, '처리 중 오류가 발생했어요'),
+  'REJECTED': (UiTone.danger, '지금은 진행할 수 없어요'),
+};
 
-  final int total;
-  final Future<void> Function(int ms) sleep;
-  late final Timer _timer;
-  int done = 0;
+/// 업무 모달: 기존 업무 화면을 그대로 열고, 닫힐 때 호출자에게 알린다.
+/// 업무 화면은 결과를 보여 줄 뿐이며, 완료 판정은 호출자가 은행 재조회로 한다.
+class TaskModalState extends ChangeNotifier {
+  TaskModalState({required this.taskId, required this.sessionId, required this.mode, this.onClose});
 
-  Future<void> finish(bool success) async {
-    _timer.cancel();
-    if (!success) return;
-    while (done < total) {
-      done++;
-      notifyListeners();
-      await sleep(150);
-    }
-    await sleep(250);
-  }
+  final String taskId;
+  final String sessionId;
 
-  @override
-  void dispose() {
-    _timer.cancel();
-    super.dispose();
-  }
+  /// ai | menu
+  final String mode;
+
+  /// 닫힐 때 (status, taskId, sessionId)
+  final void Function(String status)? onClose;
+
+  /// OPEN | RUNNING | COMPLETED | IN_PROGRESS | PARTIAL | ERROR | REJECTED
+  String status = 'OPEN';
+  int progress = 0;
+  String message = '';
+  final Map<String, String> input = {};
+
+  bool get running => status == 'RUNNING';
+  bool get finished => taskModalStatus.containsKey(status);
+
+  void changed() => notifyListeners();
 }

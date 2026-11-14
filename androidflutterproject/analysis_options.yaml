@@ -1,6 +1,9 @@
 include: package:flutter_lints/flutter.yaml
 
 analyzer:
+  errors:
+    # Flutter 3.47부터 package:flutter/material.dart 자체가 deprecated 표시됨 (material_ui 분리 예정)
+    deprecated_member_use: ignore
   exclude:
     - build/**
     - android/**

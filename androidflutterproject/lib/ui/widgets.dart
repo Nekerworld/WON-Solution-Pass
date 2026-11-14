@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../app/overlays.dart';
 import '../domain/bank_types.dart';
+import '../domain/rule_engine.dart' show statusLabel;
 import 'icons.dart';
 import 'responsive.dart';
 import 'theme.dart';
@@ -840,6 +841,171 @@ class QueryErrorView extends StatelessWidget {
           title: '정보를 불러오지 못했어요',
           desc: '${error?.message ?? '화면을 표시하는 중 문제가 발생했어요.'}\n확인되지 않은 정보로 진행하지 않아요. 잠시 후 다시 시도해 주세요.',
         ),
+      ],
+    );
+  }
+}
+
+/* ==================================================================
+ * 해결패스 공용 조각
+ * ================================================================== */
+
+const Map<String, UiTone> _condTone = {'MET': UiTone.success, 'UNMET': UiTone.danger, 'UNKNOWN': UiTone.neutral, 'IN_PROGRESS': UiTone.warning};
+const Map<String, String> _condLabel = statusLabel;
+
+/// 조건 판정 배지
+class CondBadge extends StatelessWidget {
+  const CondBadge(this.status, {super.key, this.label});
+
+  final String status;
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) => ToneBadge(label ?? _condLabel[status] ?? status, _condTone[status] ?? UiTone.neutral);
+}
+
+/// '**굵게**' 표시를 굵은 글씨로 바꾼다
+List<InlineSpan> boldMarkup(String text) {
+  final out = <InlineSpan>[];
+  final parts = text.split('**');
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i].isEmpty) continue;
+    out.add(i.isOdd ? bold(parts[i]) : TextSpan(text: parts[i]));
+  }
+  return out;
+}
+
+class LeadText extends StatelessWidget {
+  const LeadText(this.text, {super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(2, 18, 2, 14),
+        child: Text(text, style: ts(15, color: AppColors.text2, height: 1.55)),
+      );
+}
+
+/// 진행 중인 건이 없을 때의 빈 화면
+class EmptyScreen extends StatelessWidget {
+  const EmptyScreen({super.key, required this.title, required this.message, this.buttonLabel, this.onButton, this.onBack, this.noBack = false});
+
+  final String title;
+  final String message;
+  final String? buttonLabel;
+  final FutureOr<void> Function()? onButton;
+  final VoidCallback? onBack;
+  final bool noBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return ScreenFrame(
+      white: true,
+      appBar: WspAppBar(title: title, onBack: onBack, noBack: noBack),
+      children: [
+        LeadText(message),
+        if (buttonLabel != null) AppButton(buttonLabel!, block: false, onPressed: onButton),
+      ],
+    );
+  }
+}
+
+/// 답변 칩 (예/아니오, 범위 답변, 빠른 문장)
+class AnswerChip extends StatelessWidget {
+  const AnswerChip(this.label, {super.key, required this.onTap, this.large = false, this.accent = false, this.selected = false});
+
+  final String label;
+  final VoidCallback? onTap;
+  final bool large;
+  final bool accent;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = selected ? Colors.white : (accent ? AppColors.blue : AppColors.text);
+    final bg = selected ? AppColors.blue : (accent ? AppColors.blueLight : Colors.white);
+    return Opacity(
+      opacity: onTap == null ? 0.5 : 1,
+      child: Material(
+        color: bg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          side: BorderSide(color: selected ? AppColors.blue : (accent ? const Color(0xFFCFE2F5) : AppColors.lineStrong)),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const StadiumBorder(),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: large ? 16 : 13, vertical: large ? 11 : 8),
+            child: Text(label, style: ts(large ? 14 : 13, weight: FontWeight.w700, color: fg)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ChipWrap extends StatelessWidget {
+  const ChipWrap(this.children, {super.key});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Wrap(spacing: 8, runSpacing: 8, children: children);
+}
+
+/// 카드 제목 (아이콘 + 굵은 글씨)
+class CardTitle extends StatelessWidget {
+  const CardTitle(this.text, {super.key, this.icon, this.color});
+
+  final String text;
+  final SvgArt? icon;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? AppColors.text;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          if (icon != null) ...[SvgIcon(icon!, size: 18, color: c), const SizedBox(width: 6)],
+          Expanded(child: Text(text, style: ts(15, weight: FontWeight.w700, color: c, letterSpacing: -0.02))),
+        ],
+      ),
+    );
+  }
+}
+
+/// 점 목록 (동의 범위 등)
+class BulletList extends StatelessWidget {
+  const BulletList(this.items, {super.key, this.negative = false});
+
+  final List<String> items;
+  final bool negative;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final t in items)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 3, right: 8),
+                  child: negative
+                      ? SvgIcon(AppIcons.x, size: 13, color: AppColors.danger)
+                      : SvgIcon(AppIcons.check, size: 13, color: AppColors.success),
+                ),
+                Expanded(child: Text(t, style: ts(13.5, color: AppColors.text2, height: 1.5))),
+              ],
+            ),
+          ),
       ],
     );
   }

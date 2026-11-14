@@ -3,14 +3,8 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
-import 'app/case_controller.dart';
-import 'app/chatbot_service.dart';
-import 'data/bank_store.dart';
 import 'data/key_value_storage.dart';
-import 'data/mock_bank.dart';
 import 'demo/demo_screen.dart';
-import 'domain/event_log.dart';
-import 'domain/pathfinder.dart';
 import 'ui/app_scope.dart';
 import 'ui/responsive.dart';
 import 'ui/shell.dart';
@@ -20,25 +14,6 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final storage = await PrefsStorage.open();
   runApp(WonSolutionPassApp(services: createServices(storage)));
-}
-
-/// 의존성 조립. 백엔드·외부 API 없이 기기 안의 가상 은행만 사용한다.
-AppServices createServices(KeyValueStorage storage, {double latencyScale = 1, double timeScale = 1}) {
-  final events = EventLog();
-  final store = BankStore(events: events, storage: storage);
-  final bank = MockBank(store: store, latencyScale: latencyScale);
-  final pathfinder = Pathfinder(events: events);
-  final chatbot = ChatbotService(bank: bank, pathfinder: pathfinder, events: events);
-  final controller = CaseController(
-    store: store,
-    bank: bank,
-    events: events,
-    pathfinder: pathfinder,
-    chatbot: chatbot,
-    storage: storage,
-    timeScale: timeScale,
-  );
-  return AppServices(controller: controller, store: store, bank: bank, events: events, pathfinder: pathfinder);
 }
 
 class WonSolutionPassApp extends StatefulWidget {
@@ -65,7 +40,7 @@ class _WonSolutionPassAppState extends State<WonSolutionPassApp> {
     showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
-      barrierLabel: '개발자 도구 닫기',
+      barrierLabel: '시연 제어 닫기',
       barrierColor: Colors.transparent,
       transitionDuration: const Duration(milliseconds: 220),
       pageBuilder: (context, _, _) => const _DemoModal(),
@@ -89,7 +64,7 @@ class _WonSolutionPassAppState extends State<WonSolutionPassApp> {
   }
 }
 
-/// 개발자 도구. 앱 위를 블러 처리하고 시연 컨트롤을 카드로 띄운다.
+/// 시연 제어 화면. 앱 위를 블러 처리하고 시연 컨트롤을 카드로 띄운다.
 class _DemoModal extends StatelessWidget {
   const _DemoModal();
 

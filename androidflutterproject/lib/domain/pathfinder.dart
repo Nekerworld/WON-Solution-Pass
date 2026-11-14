@@ -1,260 +1,119 @@
-/// 현재 추상 상태(facts)에서 목표 상태(goal)까지의 해결 경로를 계산한다.
-/// 1) 상태 그래프 생성: 현재 상태에서 출발해 사전 조건을 만족하는 행동으로 도달 가능한
-///    모든 상태(노드)와 행동(간선)을 만든다. 간선 weight는 DemoPolicy.actionWeights.
-/// 2) 다익스트라: 간선 weight 합이 최소인 목표 상태까지의 경로를 고른다.
-/// - 방문한 상태는 직렬화 키로 식별하여 같은 상태를 중복 생성하지 않는다.
-/// - 경로가 없거나 차단 사유가 있으면 상담 연결(ESCALATE_TO_SUPPORT)로 대체한다.
-/// 고정된 순서 배열을 출력하지 않는다. 순서는 사전 조건, 현재 상태, 정책 가중치에서 결정된다.
+/// 현재 은행 사실(facts)에서 상품 조건(goal)까지 도달하는 업무 경로를 계산한다.
+/// 1) 상태 그래프: 업무의 선행 조건과 효과로 도달 가능한 상태를 펼친다.
+///    고객 제약이 false인 업무는 제외하고, 모르는 제약(null)은 낙관 모드에서만 허용한다.
+/// 2) 다익스트라: 업무 가중치 합이 가장 작은 경로를 고른다.
+/// 3) 다음 단계의 대체 수단 목록, 필요한 질문, 경로가 없을 때의 순환 원인을 함께 돌려준다.
+/// 업무와 대체 수단은 은행 데이터에서만 온다. 경로를 만들어 내지 않는다.
 library;
 
-import 'bank_types.dart';
+import 'package:flutter/foundation.dart';
+
+import 'bank_state.dart';
 import 'event_log.dart';
-import 'formatters.dart';
-import 'policy.dart';
 import 'rule_engine.dart';
+import 'scenario.dart';
 
-const int maxDepth = 6;
+const int maxDepth = 10;
+final List<String> factKeys = facts.keys.toList();
 
-/// precondition 형식
-///  { fact, equals }                 : facts[fact] == equals
-///  { fact, equals, constraint: id } : 규칙 엔진이 해당 제약(id)을 활성화했을 때만 적용
-///  { goalSatisfied: true }          : 목표 상태의 모든 조건 충족
-class Precondition {
-  const Precondition.fact(this.fact, this.equals, {this.constraint}) : goalSatisfied = false;
-  const Precondition.goal()
-      : fact = null,
-        equals = null,
-        constraint = null,
-        goalSatisfied = true;
+typedef Facts = Map<String, bool>;
+typedef Constraints = Map<String, bool?>;
 
-  final String? fact;
-  final bool? equals;
-  final String? constraint;
-  final bool goalSatisfied;
-}
-
-class Effect {
-  const Effect(this.fact, this.value);
-
-  final String fact;
-  final bool value;
-}
-
-class StepPhrase {
-  const StepPhrase({required this.first, required this.mid, required this.last});
-
-  final String first;
-  final String mid;
-  final String last;
-}
-
-class ResolveAction {
-  const ResolveAction({
-    required this.id,
-    required this.label,
-    required this.flowId,
-    required this.preconditions,
-    required this.effects,
-    required this.cta,
-    this.resolves,
-    this.terminal = false,
-    this.fallbackOnly = false,
-    this.phrase,
-  });
-
-  final String id;
-  final String label;
-  final String flowId;
-  final String? resolves;
-  final bool terminal;
-  final bool fallbackOnly;
-  final List<Precondition> preconditions;
-  final List<Effect> effects;
-  final StepPhrase? phrase;
-  final String cta;
-}
-
-const List<ResolveAction> actions = [
-  ResolveAction(
-    id: 'COMPLETE_KYC',
-    label: '고객확인 완료',
-    flowId: 'kyc-flow',
-    resolves: 'kycCompleted',
-    preconditions: [
-      Precondition.fact('kycCompleted', false),
-      Precondition.fact('accountRestricted', false),
-      Precondition.fact('bankAvailable', true),
-    ],
-    effects: [Effect('kycCompleted', true)],
-    phrase: StepPhrase(first: '고객확인을 완료한', mid: '고객확인을 완료하고', last: '고객확인을 완료해 주세요'),
-    cta: '고객확인 하러 가기',
-  ),
-  ResolveAction(
-    id: 'REGISTER_OTP',
-    label: '디지털 OTP 등록',
-    flowId: 'otp-registration',
-    resolves: 'otpRegistered',
-    preconditions: [
-      Precondition.fact('otpRegistered', false),
-      Precondition.fact('kycCompleted', true, constraint: 'R08'),
-      Precondition.fact('accountRestricted', false),
-      Precondition.fact('bankAvailable', true),
-    ],
-    effects: [Effect('otpRegistered', true)],
-    phrase: StepPhrase(first: 'OTP 등록을 진행한', mid: 'OTP 등록을 진행하고', last: 'OTP 등록을 진행해 주세요'),
-    cta: '디지털 OTP 등록하러 가기',
-  ),
-  ResolveAction(
-    id: 'CHANGE_TRANSFER_LIMIT',
-    label: '이체한도 변경',
-    flowId: 'limit-management',
-    resolves: 'limitSufficient',
-    preconditions: [
-      Precondition.fact('limitSufficient', false),
-      Precondition.fact('limitChangeAllowed', true),
-      Precondition.fact('otpRegistered', true, constraint: 'R03'),
-      Precondition.fact('accountRestricted', false),
-      Precondition.fact('bankAvailable', true),
-    ],
-    effects: [Effect('limitSufficient', true)],
-    phrase: StepPhrase(first: '한도를 변경한', mid: '한도를 변경하고', last: '한도를 변경해 주세요'),
-    cta: '이체한도 변경하러 가기',
-  ),
-  ResolveAction(
-    id: 'RETURN_TO_TRANSFER',
-    label: '원래 이체로 돌아가기',
-    flowId: 'transfer',
-    terminal: true,
-    preconditions: [Precondition.goal(), Precondition.fact('returnedToTransfer', false)],
-    effects: [Effect('returnedToTransfer', true)],
-    cta: '원래 이체로 돌아가기',
-  ),
-  ResolveAction(
-    id: 'ESCALATE_TO_SUPPORT',
-    label: '상담 연결',
-    flowId: 'support',
-    fallbackOnly: true,
-    preconditions: [],
-    effects: [],
-    cta: '상담 연결 안내 보기',
-  ),
-];
-
-ResolveAction? getAction(String id) {
-  for (final a in actions) {
-    if (a.id == id) return a;
+/// 'OK' | 'UNKNOWN' | 'BLOCKED'
+String availability(TaskDef action, Constraints c) {
+  var result = 'OK';
+  for (final k in action.needs.keys) {
+    final v = c[k];
+    if (v == false) {
+      result = 'BLOCKED';
+    } else if (v == null && result != 'BLOCKED') {
+      result = 'UNKNOWN';
+    }
   }
-  return null;
+  return result;
 }
 
-bool goalSatisfied(Facts facts, Facts goal) => goal.keys.every((k) => facts[k] == goal[k]);
+List<String> unknownNeeds(TaskDef action, Constraints c) => [for (final k in action.needs.keys) if (c[k] == null) k];
 
-bool isGoal(Facts facts, Facts goal) => goalSatisfied(facts, goal) && facts['returnedToTransfer'] == true;
-
-bool isApplicable(ResolveAction action, Facts facts, Facts goal, Set<String> activeConstraints) {
-  if (action.fallbackOnly) return false;
-  return action.preconditions.every((pre) {
-    if (pre.goalSatisfied) return goalSatisfied(facts, goal);
-    if (pre.constraint != null && !activeConstraints.contains(pre.constraint)) return true;
-    return facts[pre.fact] == pre.equals;
-  });
+bool _preOk(TaskDef a, Facts f) => a.pre.entries.every((e) => (f[e.key] ?? false) == e.value);
+bool _useful(TaskDef a, Facts f) => a.effects.entries.any((e) => (f[e.key] ?? false) != e.value);
+bool _allowed(TaskDef a, Constraints c, String mode) {
+  final av = availability(a, c);
+  return av == 'OK' || (mode == 'optimistic' && av == 'UNKNOWN');
 }
 
-Facts applyEffects(ResolveAction action, Facts facts) {
-  final next = Map<String, bool>.of(facts);
-  for (final e in action.effects) {
-    next[e.fact] = e.value;
-  }
-  return next;
-}
+bool _sameEffect(TaskDef a, TaskDef b) => b.effects.entries.any((e) => a.effects[e.key] == e.value);
+bool _isGoal(Facts f, Facts goal) => goal.entries.every((e) => (f[e.key] ?? false) == e.value);
+String keyOf(Facts f) => factKeys.map((k) => '$k:${f[k] == true ? 1 : 0}').join('|');
 
-String keyOf(Facts facts) {
-  final keys = facts.keys.toList()..sort();
-  return keys.map((k) => '$k:${facts[k] == true ? 1 : 0}').join('|');
-}
+Facts _applyEffects(TaskDef a, Facts f) => {...f, ...a.effects};
 
-int weightOf(ResolveAction action) {
-  final w = DemoPolicy.actionWeights[action.id];
-  return (w != null && w > 0) ? w : 1;
-}
-
-class GraphNode {
-  const GraphNode({required this.key, required this.facts, required this.depth, required this.goal});
-
+class _Node {
+  _Node(this.key, this.facts, this.depth, this.goal);
   final String key;
   final Facts facts;
   final int depth;
   final bool goal;
 }
 
-class GraphEdge {
-  const GraphEdge({required this.from, required this.to, required this.actionId, required this.weight});
-
+class _Edge {
+  _Edge(this.from, this.to, this.actionId, this.weight, this.unknown);
   final String from;
   final String to;
   final String actionId;
   final int weight;
+  final bool unknown;
 }
 
-class StateGraph {
-  StateGraph({required this.startKey, required this.nodes, required this.adjacency, List<GraphEdge>? edges})
-      : edges = edges ?? [];
-
+class _Graph {
+  _Graph(this.startKey, this.nodes, this.edges, this.adjacency);
   final String startKey;
-  final Map<String, GraphNode> nodes;
-  final List<GraphEdge> edges;
-  final Map<String, List<GraphEdge>> adjacency;
+  final Map<String, _Node> nodes;
+  final List<_Edge> edges;
+  final Map<String, List<_Edge>> adjacency;
 }
 
-/// 현재 상태에서 도달 가능한 상태 그래프를 만든다.
-/// 목표 상태와 깊이 제한(maxDepth)에 닿은 노드는 더 확장하지 않는다.
-StateGraph buildStateGraph(Facts startFacts, Facts goal, List<ConstraintInfo> constraints) {
-  final active = constraints.map((c) => c.ruleId).toSet();
-  final startKey = keyOf(startFacts);
-  final nodes = <String, GraphNode>{
-    startKey: GraphNode(key: startKey, facts: startFacts, depth: 0, goal: isGoal(startFacts, goal)),
-  };
-  final edges = <GraphEdge>[];
-  final adjacency = <String, List<GraphEdge>>{};
+_Graph _buildStateGraph(Facts start, Facts goal, Constraints c, String mode) {
+  final startKey = keyOf(start);
+  final nodes = <String, _Node>{startKey: _Node(startKey, start, 0, _isGoal(start, goal))};
+  final edges = <_Edge>[];
+  final adjacency = <String, List<_Edge>>{};
   final queue = <String>[startKey];
   var head = 0;
-
   while (head < queue.length) {
     final key = queue[head++];
     final node = nodes[key]!;
     adjacency[key] = [];
     if (node.goal || node.depth >= maxDepth) continue;
-    for (final action in actions) {
-      if (!isApplicable(action, node.facts, goal, active)) continue;
-      final next = applyEffects(action, node.facts);
+    for (final action in tasks) {
+      if (!_allowed(action, c, mode) || !_preOk(action, node.facts) || !_useful(action, node.facts)) continue;
+      final next = _applyEffects(action, node.facts);
       final nk = keyOf(next);
       if (!nodes.containsKey(nk)) {
-        nodes[nk] = GraphNode(key: nk, facts: next, depth: node.depth + 1, goal: isGoal(next, goal));
+        nodes[nk] = _Node(nk, next, node.depth + 1, _isGoal(next, goal));
         queue.add(nk);
       }
-      final edge = GraphEdge(from: key, to: nk, actionId: action.id, weight: weightOf(action));
-      edges.add(edge);
-      adjacency[key]!.add(edge);
+      final e = _Edge(key, nk, action.id, action.weight, availability(action, c) == 'UNKNOWN');
+      edges.add(e);
+      adjacency[key]!.add(e);
     }
   }
-  return StateGraph(startKey: startKey, nodes: nodes, edges: edges, adjacency: adjacency);
+  return _Graph(startKey, nodes, edges, adjacency);
 }
 
 class _HeapItem {
   _HeapItem(this.cost, this.key, this.seq);
-
   final int cost;
   final String key;
   final int seq;
 }
 
-/// 다익스트라용 최소 힙. 비용이 같으면 먼저 넣은 항목이 먼저 나온다.
-class MinHeap {
+/// 최소 힙. 비용이 같으면 먼저 들어온 순서
+class _MinHeap {
   final List<_HeapItem> _a = [];
   int _seq = 0;
 
   int get size => _a.length;
-
   bool _less(_HeapItem x, _HeapItem y) => x.cost < y.cost || (x.cost == y.cost && x.seq < y.seq);
 
   void push(int cost, String key) {
@@ -270,15 +129,14 @@ class MinHeap {
     }
   }
 
-  ({int cost, String key}) pop() {
+  _HeapItem pop() {
     final top = _a.first;
     final last = _a.removeLast();
     if (_a.isNotEmpty) {
       _a[0] = last;
       var i = 0;
       for (;;) {
-        final l = i * 2 + 1;
-        final r = l + 1;
+        final l = i * 2 + 1, r = l + 1;
         var m = i;
         if (l < _a.length && _less(_a[l], _a[m])) m = l;
         if (r < _a.length && _less(_a[r], _a[m])) m = r;
@@ -289,48 +147,34 @@ class MinHeap {
         i = m;
       }
     }
-    return (cost: top.cost, key: top.key);
+    return top;
   }
 }
 
-class DijkstraResult {
-  const DijkstraResult({
-    required this.found,
-    required this.goalKey,
-    required this.cost,
-    required this.dist,
-    required this.prev,
-    required this.explored,
-  });
-
+class _Search {
+  _Search(this.found, this.goalKey, this.cost, this.dist, this.prev, this.explored);
   final bool found;
   final String? goalKey;
-
-  /// 경로가 없으면 null (무한대)
   final int? cost;
   final Map<String, int> dist;
-  final Map<String, GraphEdge> prev;
+  final Map<String, _Edge> prev;
   final int explored;
 }
 
-/// 상태 그래프에서 목표 노드까지 weight 합이 최소인 경로를 찾는다.
-DijkstraResult dijkstra(StateGraph graph) {
-  final dist = <String, int>{graph.startKey: 0};
-  final prev = <String, GraphEdge>{};
+_Search _dijkstra(_Graph g) {
+  final dist = <String, int>{g.startKey: 0};
+  final prev = <String, _Edge>{};
   final settled = <String>{};
-  final heap = MinHeap()..push(0, graph.startKey);
+  final heap = _MinHeap()..push(0, g.startKey);
   var explored = 0;
-
   while (heap.size > 0) {
-    final (:cost, :key) = heap.pop();
-    if (settled.contains(key)) continue;
-    settled.add(key);
-    explored += 1;
-    if (graph.nodes[key]!.goal) {
-      return DijkstraResult(found: true, goalKey: key, cost: cost, dist: dist, prev: prev, explored: explored);
-    }
-    for (final e in graph.adjacency[key] ?? const <GraphEdge>[]) {
-      final nd = cost + e.weight;
+    final it = heap.pop();
+    if (settled.contains(it.key)) continue;
+    settled.add(it.key);
+    explored++;
+    if (g.nodes[it.key]!.goal) return _Search(true, it.key, it.cost, dist, prev, explored);
+    for (final e in g.adjacency[it.key]!) {
+      final nd = it.cost + e.weight;
       final cur = dist[e.to];
       if (cur == null || nd < cur) {
         dist[e.to] = nd;
@@ -339,12 +183,11 @@ DijkstraResult dijkstra(StateGraph graph) {
       }
     }
   }
-  return DijkstraResult(found: false, goalKey: null, cost: null, dist: dist, prev: prev, explored: explored);
+  return _Search(false, null, null, dist, prev, explored);
 }
 
-class SerializedNode {
-  const SerializedNode({required this.key, required this.facts, required this.depth, required this.goal, required this.dist});
-
+class GraphNode {
+  const GraphNode({required this.key, required this.facts, required this.depth, required this.goal, required this.dist});
   final String key;
   final Facts facts;
   final int depth;
@@ -352,318 +195,398 @@ class SerializedNode {
   final int? dist;
 }
 
-class SerializedEdge {
-  const SerializedEdge({
-    required this.from,
-    required this.to,
-    required this.actionId,
-    required this.weight,
-    required this.onPath,
-  });
-
+class GraphEdge {
+  const GraphEdge({required this.from, required this.to, required this.actionId, required this.weight, required this.unknown, required this.onPath});
   final String from;
   final String to;
   final String actionId;
   final int weight;
+  final bool unknown;
   final bool onPath;
 }
 
-/// 시연 제어 화면 시각화용 직렬화 그래프
 class SerializedGraph {
   const SerializedGraph({required this.startKey, required this.goalKey, required this.nodes, required this.edges});
-
   final String startKey;
   final String? goalKey;
-  final List<SerializedNode> nodes;
-  final List<SerializedEdge> edges;
+  final List<GraphNode> nodes;
+  final List<GraphEdge> edges;
 }
 
-SerializedGraph _serializeGraph(StateGraph graph, DijkstraResult search, List<GraphEdge> pathEdges) {
-  final onPath = pathEdges.toSet();
-  return SerializedGraph(
-    startKey: graph.startKey,
-    goalKey: search.goalKey,
-    nodes: graph.nodes.values
-        .map((n) => SerializedNode(key: n.key, facts: n.facts, depth: n.depth, goal: n.goal, dist: search.dist[n.key]))
-        .toList(),
-    edges: graph.edges
-        .map((e) => SerializedEdge(from: e.from, to: e.to, actionId: e.actionId, weight: e.weight, onPath: onPath.contains(e)))
-        .toList(),
-  );
-}
-
-class PlanStep {
-  const PlanStep({
-    required this.actionId,
-    required this.label,
-    required this.flowId,
-    required this.weight,
-    required this.before,
-    required this.after,
-  });
-
+class PathStep {
+  const PathStep({required this.actionId, required this.label, required this.weight, required this.unknown});
   final String actionId;
   final String label;
-  final String flowId;
   final int weight;
-  final Facts before;
-  final Facts after;
+  final bool unknown;
+
+  Json toJson() => {'actionId': actionId, 'label': label, 'weight': weight, 'unknown': unknown};
+  factory PathStep.fromJson(Json j) => PathStep(
+        actionId: j['actionId'] as String? ?? '',
+        label: j['label'] as String? ?? '',
+        weight: asInt(j['weight']) ?? 1,
+        unknown: j['unknown'] == true,
+      );
 }
 
 class PathResult {
-  const PathResult({
-    required this.found,
-    required this.steps,
-    required this.cost,
-    required this.explored,
-    required this.visited,
-    required this.graph,
-  });
-
+  const PathResult({required this.found, required this.cost, required this.steps, required this.explored, required this.visited, required this.graph});
   final bool found;
-  final List<PlanStep> steps;
   final int? cost;
+  final List<PathStep> steps;
   final int explored;
   final int visited;
   final SerializedGraph graph;
 }
 
-/// 상태 그래프 + 다익스트라 경로 탐색
-PathResult findPath(Facts startFacts, Facts goal, List<ConstraintInfo> constraints) {
-  final graph = buildStateGraph(startFacts, goal, constraints);
-  final search = dijkstra(graph);
-  final pathEdges = <GraphEdge>[];
-  if (search.found) {
-    var k = search.goalKey!;
-    while (k != graph.startKey) {
-      final e = search.prev[k]!;
+PathResult findPath(Facts start, Facts goal, Constraints c, [String mode = 'optimistic']) {
+  final g = _buildStateGraph(start, goal, c, mode);
+  final s = _dijkstra(g);
+  final pathEdges = <_Edge>[];
+  if (s.found) {
+    var k = s.goalKey!;
+    while (k != g.startKey) {
+      final e = s.prev[k]!;
       pathEdges.insert(0, e);
       k = e.from;
     }
   }
-  final steps = pathEdges.map((e) {
-    final action = getAction(e.actionId)!;
-    return PlanStep(
-      actionId: action.id,
-      label: action.label,
-      flowId: action.flowId,
-      weight: e.weight,
-      before: graph.nodes[e.from]!.facts,
-      after: graph.nodes[e.to]!.facts,
-    );
-  }).toList();
+  final onPath = pathEdges.toSet();
   return PathResult(
-    found: search.found,
-    steps: steps,
-    cost: search.found ? search.cost : null,
-    explored: search.explored,
-    visited: graph.nodes.length,
-    graph: _serializeGraph(graph, search, pathEdges),
+    found: s.found,
+    cost: s.found ? s.cost : null,
+    steps: [for (final e in pathEdges) PathStep(actionId: e.actionId, label: getTask(e.actionId)!.label, weight: e.weight, unknown: e.unknown)],
+    explored: s.explored,
+    visited: g.nodes.length,
+    graph: SerializedGraph(
+      startKey: g.startKey,
+      goalKey: s.goalKey,
+      nodes: [for (final n in g.nodes.values) GraphNode(key: n.key, facts: n.facts, depth: n.depth, goal: n.goal, dist: s.dist[n.key])],
+      edges: [
+        for (final e in g.edges)
+          GraphEdge(from: e.from, to: e.to, actionId: e.actionId, weight: e.weight, unknown: e.unknown, onPath: onPath.contains(e)),
+      ],
+    ),
   );
 }
 
-/// 'PLAN'    사용자 행동이 필요한 경로가 있음
-/// 'READY'   추가 절차 없이 원래 이체로 돌아갈 수 있음
-/// 'BLOCKED' 자동 해결 경로 생성 금지 (계좌 제한, 시스템 장애 등)
-/// 'NO_PATH' 목표에 도달하는 유효 경로 없음 -> 상담 안내
-enum PlanStatus {
-  plan('PLAN'),
-  ready('READY'),
-  blocked('BLOCKED'),
-  noPath('NO_PATH');
+/// 경로가 없는 원인. type: NO_METHOD | NO_TASK | CYCLE
+class RouteCause {
+  const RouteCause({required this.type, this.fact, this.chain = const [], this.via = const [], this.blocked = const []});
+  final String type;
+  final String? fact;
+  final List<String> chain;
+  final List<String?> via;
 
-  const PlanStatus(this.code);
-  final String code;
+  /// (actionId, 막힌 제약 키 목록)
+  final List<(String, List<String>)> blocked;
+
+  Json toJson() => {
+        'type': type,
+        'fact': fact,
+        'chain': chain,
+        'via': via,
+        'blocked': [for (final (a, n) in blocked) {'actionId': a, 'needs': n}],
+      };
+
+  static RouteCause? fromJson(Object? v) {
+    if (v is! Map) return null;
+    final j = asJson(v);
+    return RouteCause(
+      type: j['type'] as String? ?? '',
+      fact: j['fact'] as String?,
+      chain: asStrings(j['chain']),
+      via: asList(j['via']).map((e) => e as String?).toList(),
+      blocked: [
+        for (final b in asList(j['blocked'])) (asJson(b)['actionId'] as String? ?? '', asStrings(asJson(b)['needs'])),
+      ],
+    );
+  }
 }
 
-class Plan {
-  Plan({
-    required this.status,
-    required this.evaluation,
-    required this.steps,
-    required this.actionSteps,
-    required this.explored,
-    required this.visited,
-    required this.computedAt,
-    this.blocker,
-    this.fallback,
-    this.cost,
-    this.graph,
-    this.queryError,
+/// 경로가 없을 때 원인을 찾는다.
+/// - NO_METHOD: 조건을 채울 업무가 고객 제약으로 모두 막힘
+/// - CYCLE: A를 하려면 B, B를 하려면 A가 필요한 순환
+RouteCause? detectCycle(Facts f, Facts goal, Constraints c) {
+  final unmet = [for (final e in goal.entries) if ((f[e.key] ?? false) != e.value) e.key];
+  final deps = <String, List<String>>{};
+  final stuck = <String>{};
+  for (final fact in unmet) {
+    final all = tasks.where((a) => a.effects[fact] == true).toList();
+    final producers = all.where((a) => availability(a, c) != 'BLOCKED').toList();
+    if (producers.isEmpty) {
+      return RouteCause(
+        type: all.isNotEmpty ? 'NO_METHOD' : 'NO_TASK',
+        fact: fact,
+        blocked: [for (final a in all) (a.id, [for (final k in a.needs.keys) if (c[k] == false) k])],
+      );
+    }
+    final needSets = [for (final a in producers) [for (final p in a.pre.entries) if ((f[p.key] ?? false) != p.value) p.key]];
+    if (needSets.every((s) => s.isNotEmpty)) stuck.add(fact);
+    final d = deps[fact] = <String>[];
+    for (final s in needSets) {
+      for (final p in s) {
+        if (!d.contains(p)) d.add(p);
+      }
+    }
+  }
+  final color = <String, int>{};
+  List<String>? found;
+  void dfs(String fact, List<String> path) {
+    if (found != null) return;
+    color[fact] = 1;
+    path.add(fact);
+    for (final g in deps[fact] ?? const <String>[]) {
+      if (found != null || !stuck.contains(g)) continue;
+      if (color[g] == 1) {
+        found = [...path.sublist(path.indexOf(g)), g];
+      } else if (color[g] == null) {
+        dfs(g, path);
+      }
+    }
+    path.removeLast();
+    color[fact] = 2;
+  }
+
+  for (final s in stuck.toList()) {
+    if (color[s] == null) dfs(s, []);
+  }
+  final chain = found;
+  if (chain == null) return null;
+  final via = <String?>[];
+  for (var i = 0; i < chain.length - 1; i++) {
+    TaskDef? a;
+    for (final x in tasks) {
+      if (x.effects[chain[i]] == true && x.pre[chain[i + 1]] == true && availability(x, c) != 'BLOCKED') {
+        a = x;
+        break;
+      }
+    }
+    via.add(a?.id);
+  }
+  return RouteCause(type: 'CYCLE', chain: chain, via: via);
+}
+
+class RouteOption {
+  const RouteOption({
+    required this.actionId,
+    required this.label,
+    required this.availability,
+    required this.reachable,
+    required this.cost,
+    required this.recommended,
+    required this.unknownNeeds,
+    required this.blockedNeeds,
+    this.shown = true,
   });
 
-  final PlanStatus status;
-  final Evaluation? evaluation;
-  final List<PlanStep> steps;
-  final List<PlanStep> actionSteps;
-  final Blocker? blocker;
-  final ResolveAction? fallback;
+  final String actionId;
+  final String label;
+  final String availability;
+  final bool reachable;
   final int? cost;
-  final int explored;
-  final int visited;
+  final bool recommended;
+  final List<String> unknownNeeds;
+  final List<String> blockedNeeds;
+
+  /// 화면에서 고를 수 있는 방법인지 (가입 흐름이 AI 검증 후 채운다)
+  final bool shown;
+
+  RouteOption withShown(bool v) => RouteOption(
+        actionId: actionId,
+        label: label,
+        availability: availability,
+        reachable: reachable,
+        cost: cost,
+        recommended: recommended,
+        unknownNeeds: unknownNeeds,
+        blockedNeeds: blockedNeeds,
+        shown: v,
+      );
+
+  Json toJson() => {
+        'actionId': actionId,
+        'label': label,
+        'availability': availability,
+        'reachable': reachable,
+        'cost': cost,
+        'recommended': recommended,
+        'unknownNeeds': unknownNeeds,
+        'blockedNeeds': blockedNeeds,
+        'shown': shown,
+      };
+
+  factory RouteOption.fromJson(Json j) => RouteOption(
+        actionId: j['actionId'] as String? ?? '',
+        label: j['label'] as String? ?? '',
+        availability: j['availability'] as String? ?? 'OK',
+        reachable: j['reachable'] == true,
+        cost: asInt(j['cost']),
+        recommended: j['recommended'] == true,
+        unknownNeeds: asStrings(j['unknownNeeds']),
+        blockedNeeds: asStrings(j['blockedNeeds']),
+        shown: j['shown'] != false,
+      );
+}
+
+/// status: READY | PLAN | NO_PATH | BLOCKED | UNKNOWN
+class RouteResult {
+  RouteResult({
+    required this.status,
+    this.steps = const [],
+    this.options = const [],
+    this.questions = const [],
+    this.blockers = const [],
+    this.cost,
+    this.cause,
+    this.graph,
+    this.visited,
+    this.explored,
+    int? computedAt,
+  }) : computedAt = computedAt ?? DateTime.now().millisecondsSinceEpoch;
+
+  final String status;
+  final List<PathStep> steps;
+  final List<RouteOption> options;
+  final List<String> questions;
+  final List<String> blockers;
+  final int? cost;
+  final RouteCause? cause;
+
+  /// 저장하지 않는다 (시연 화면 표시용)
   final SerializedGraph? graph;
-  final BankError? queryError;
+  final int? visited;
+  final int? explored;
   final int computedAt;
 
-  /// 계획은 입력(규칙 컨텍스트 또는 조회 오류)에서 결정적으로 다시 계산되므로 입력만 저장한다.
-  Map<String, Object?> toJson() => {
-        if (evaluation != null) 'ctx': evaluation!.ctx.toJson(),
-        if (evaluation == null) 'queryError': (queryError ?? blocker?.error)?.toJson(),
+  Json toJson() => {
+        'status': status,
+        'steps': steps.map((s) => s.toJson()).toList(),
+        'options': options.map((o) => o.toJson()).toList(),
+        'questions': questions,
+        'blockers': blockers,
+        'cost': cost,
+        'cause': cause?.toJson(),
+        'visited': visited,
+        'explored': explored,
         'computedAt': computedAt,
       };
 
-  static Plan? fromJson(Map<String, Object?> j) {
-    final computedAt = (j['computedAt'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
-    final ctx = j['ctx'];
-    if (ctx is Map) {
-      return buildPlan(evaluate(RuleContext.fromJson(ctx.cast())), computedAt: computedAt);
-    }
-    final err = j['queryError'];
-    return buildPlanFromQueryFailure(err is Map ? BankError.fromJson(err.cast()) : null, computedAt: computedAt);
+  static RouteResult? fromJson(Object? v) {
+    if (v is! Map) return null;
+    final j = asJson(v);
+    return RouteResult(
+      status: j['status'] as String? ?? 'UNKNOWN',
+      steps: asList(j['steps']).map((s) => PathStep.fromJson(asJson(s))).toList(),
+      options: asList(j['options']).map((o) => RouteOption.fromJson(asJson(o))).toList(),
+      questions: asStrings(j['questions']),
+      blockers: asStrings(j['blockers']),
+      cost: asInt(j['cost']),
+      cause: RouteCause.fromJson(j['cause']),
+      visited: asInt(j['visited']),
+      explored: asInt(j['explored']),
+      computedAt: asInt(j['computedAt']),
+    );
   }
 }
 
-/// 규칙 평가 결과로 해결 계획을 만든다 (순수 함수).
-Plan buildPlan(Evaluation evaluation, {int? computedAt}) {
-  final at = computedAt ?? DateTime.now().millisecondsSinceEpoch;
-  if (evaluation.blockers.isNotEmpty) {
-    return Plan(
-      status: PlanStatus.blocked,
-      evaluation: evaluation,
-      steps: const [],
-      actionSteps: const [],
-      blocker: evaluation.blockers.first,
-      fallback: getAction('ESCALATE_TO_SUPPORT'),
-      explored: 0,
-      visited: 0,
-      computedAt: at,
-    );
+/// 다음 단계와 같은 효과를 내는, 지금 시작할 수 있는 대체 수단
+List<RouteOption> alternativesFor(Facts f, Facts goal, Constraints c, PathStep? firstStep) {
+  if (firstStep == null) return [];
+  final target = getTask(firstStep.actionId)!.effects.keys;
+  final list = <RouteOption>[];
+  for (final a in tasks) {
+    if (!target.any((t) => a.effects[t] == true) || !_preOk(a, f) || !_useful(a, f)) continue;
+    final av = availability(a, c);
+    final rest = av == 'BLOCKED' ? null : findPath(_applyEffects(a, f), goal, c, 'optimistic');
+    list.add(RouteOption(
+      actionId: a.id,
+      label: a.label,
+      availability: av,
+      reachable: rest?.found == true,
+      cost: rest != null && rest.found ? a.weight + rest.cost! : null,
+      recommended: a.id == firstStep.actionId,
+      unknownNeeds: unknownNeeds(a, c),
+      blockedNeeds: [for (final k in a.needs.keys) if (c[k] == false) k],
+    ));
   }
-  final search = findPath(evaluation.facts, evaluation.goal, evaluation.constraints);
-  if (!search.found) {
-    return Plan(
-      status: PlanStatus.noPath,
-      evaluation: evaluation,
-      steps: const [],
-      actionSteps: const [],
-      fallback: getAction('ESCALATE_TO_SUPPORT'),
-      explored: search.explored,
-      visited: search.visited,
-      graph: search.graph,
-      computedAt: at,
-    );
-  }
-  final actionSteps = search.steps.where((s) => !getAction(s.actionId)!.terminal).toList();
-  return Plan(
-    status: actionSteps.isNotEmpty ? PlanStatus.plan : PlanStatus.ready,
-    evaluation: evaluation,
-    steps: search.steps,
-    actionSteps: actionSteps,
-    cost: search.cost,
-    explored: search.explored,
-    visited: search.visited,
-    graph: search.graph,
-    computedAt: at,
-  );
+  final indexed = list.asMap().entries.toList()
+    ..sort((x, y) {
+      final a = x.value, b = y.value;
+      final r = (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0);
+      if (r != 0) return r;
+      final n = (a.cost == null ? 1 : 0) - (b.cost == null ? 1 : 0);
+      if (n != 0) return n;
+      if (a.cost != null && b.cost != null && a.cost != b.cost) return a.cost! - b.cost!;
+      return x.key - y.key;
+    });
+  return [for (final e in indexed) e.value];
 }
 
-/// 조회 실패 시: 정상 진단을 가장하지 않는다
-Plan buildPlanFromQueryFailure(BankError? error, {int? computedAt}) => Plan(
-      status: PlanStatus.blocked,
-      evaluation: null,
-      steps: const [],
-      actionSteps: const [],
-      blocker: blockerFromQueryFailure(error),
-      fallback: getAction('ESCALATE_TO_SUPPORT'),
-      explored: 0,
-      visited: 0,
-      queryError: error,
-      computedAt: computedAt ?? DateTime.now().millisecondsSinceEpoch,
-    );
-
-/// 계획 계산 + 이벤트 기록 + 마지막 결과 보관 (시연 제어 화면 시각화용)
-class Pathfinder {
+class Pathfinder extends ChangeNotifier {
   Pathfinder({this.events});
 
   final EventLog? events;
-  Plan? lastResult;
+  RouteResult? _last;
 
-  Plan computePlan(Evaluation evaluation) {
-    final result = buildPlan(evaluation);
-    lastResult = result;
-    final chain = result.steps.map((s) => s.actionId).join(' → ');
-    events?.add(
-      'PATH',
-      '경로 계산 [${result.status.code}] ${chain.isEmpty ? '-' : chain}'
-          '${result.cost != null ? ' (비용 ${result.cost})' : ''}'
-          ' · 상태 ${result.visited}개 / 확정 ${result.explored}개',
-    );
-    return result;
+  RouteResult? get lastResult => _last;
+  set lastResult(RouteResult? r) {
+    _last = r;
+    notifyListeners();
   }
 
-  Plan planFromQueryFailure(BankError? error) {
-    final result = buildPlanFromQueryFailure(error);
+  /// 조건 판정 결과(evaluation)와 고객 제약으로 해결 경로를 계산한다.
+  RouteResult computeRoute(Evaluation ev, Constraints c) {
+    RouteResult result;
+    if (!ev.ok) {
+      result = RouteResult(status: 'UNKNOWN');
+    } else if (ev.blockers.isNotEmpty) {
+      result = RouteResult(status: 'BLOCKED', blockers: ev.blockers);
+    } else if (ev.allMet) {
+      result = RouteResult(status: 'READY', cost: 0);
+    } else {
+      final f = ev.facts!;
+      final goal = ev.goal;
+      final opt = findPath(f, goal, c, 'optimistic');
+      if (!opt.found) {
+        result = RouteResult(
+          status: 'NO_PATH',
+          cause: detectCycle(f, goal, c),
+          graph: opt.graph,
+          visited: opt.visited,
+          explored: opt.explored,
+        );
+      } else {
+        // 확인된 제약만으로 갈 수 있는 경로가 있으면 묻지 않고 그 경로를 기본으로 쓴다.
+        final known = findPath(f, goal, c, 'known');
+        final base = known.found ? known : opt;
+        final questions = <String>[];
+        if (!known.found) {
+          for (final s in opt.steps) {
+            final a = getTask(s.actionId)!;
+            if (unknownNeeds(a, c).isEmpty) continue;
+            for (final x in tasks.where((x) => _sameEffect(x, a))) {
+              for (final k in unknownNeeds(x, c)) {
+                if (!questions.contains(k)) questions.add(k);
+              }
+            }
+          }
+        }
+        result = RouteResult(
+          status: 'PLAN',
+          steps: base.steps,
+          cost: base.cost,
+          questions: questions,
+          options: alternativesFor(f, goal, c, base.steps.isEmpty ? null : base.steps.first),
+          graph: base.graph,
+          visited: base.visited,
+          explored: base.explored,
+        );
+      }
+    }
     lastResult = result;
-    events?.add('PATH', '상태 조회 실패로 경로 계산 중단 (${error?.code})');
+    final path = result.steps.map((s) => s.actionId).join(' → ');
+    events?.add('PATH', '경로 계산 [${result.status}] ${path.isEmpty ? '-' : path}${result.cost != null ? ' (비용 ${result.cost})' : ''}');
     return result;
-  }
-}
-
-class StepDescription {
-  const StepDescription({
-    required this.problem,
-    required this.current,
-    required this.action,
-    required this.expected,
-    required this.ruleIds,
-  });
-
-  final String problem;
-  final String current;
-  final String action;
-  final String expected;
-  final List<String> ruleIds;
-}
-
-/// 단계 카드 표시용 설명
-StepDescription describeStep(String actionId, RuleContext ctx) {
-  switch (actionId) {
-    case 'COMPLETE_KYC':
-      return StepDescription(
-        problem: '고객확인이 완료되지 않았어요.',
-        current: ctx.kycCompleted ? '완료' : '미완료',
-        action: '고객확인 화면에서 절차를 진행해요.',
-        expected: '디지털 OTP 등록과 이체가 가능한 상태가 돼요.',
-        ruleIds: const ['R04'],
-      );
-    case 'REGISTER_OTP':
-      final needForTransfer = ctx.amount > DemoPolicy.otpRequiredAbove;
-      return StepDescription(
-        problem: needForTransfer
-            ? '${formatWon(DemoPolicy.otpRequiredAbove)}을 넘는 이체에는 디지털 OTP가 필요해요.'
-            : '한도를 올리려면 디지털 OTP가 먼저 필요해요.',
-        current: ctx.otpRegistered ? '등록됨' : '미등록',
-        action: '디지털 OTP 등록 화면에서 이 기기를 등록해요.',
-        expected: '고액 이체 인증과 한도 상향이 가능해져요.',
-        ruleIds: needForTransfer ? const ['R02', 'R03'] : const ['R03'],
-      );
-    case 'CHANGE_TRANSFER_LIMIT':
-      return StepDescription(
-        problem: '요청 금액 ${formatWon(ctx.amount)}이 1일 이체한도를 넘어요.',
-        current: '1일 이체한도 ${formatWon(ctx.transferLimit)}',
-        action: '이체한도를 ${formatWon(ctx.amount)} 이상으로 변경해요.',
-        expected: '요청 금액을 보낼 수 있는 한도가 확보돼요.',
-        ruleIds: const ['R01'],
-      );
-    case 'RETURN_TO_TRANSFER':
-      return const StepDescription(
-        problem: '원래 이체는 아직 실행되지 않았어요.',
-        current: '이체 정보 유지 중',
-        action: '받는 분과 금액을 확인한 뒤 직접 이체를 승인해요.',
-        expected: '은행이 처리 결과를 확인해 알려드려요.',
-        ruleIds: [],
-      );
-    default:
-      return const StepDescription(problem: '', current: '', action: '', expected: '', ruleIds: []);
   }
 }

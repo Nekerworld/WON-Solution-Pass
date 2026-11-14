@@ -1,16 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../app/case_controller.dart';
 import '../app/router.dart';
 import 'app_scope.dart';
 import 'overlay_views.dart';
-import 'screens/chat_screen.dart';
-import 'screens/flow_screens.dart';
-import 'screens/home_screen.dart';
-import 'screens/plan_screen.dart';
-import 'screens/result_screens.dart';
-import 'screens/transfer_screen.dart';
+import 'screens/asset_screens.dart';
+import 'screens/direct_screen.dart';
+import 'screens/home_screens.dart';
+import 'screens/join_screens.dart';
 import 'theme.dart';
 
 /// 화면(내부 Navigator) + 시트 / 모달 / 토스트 오버레이
@@ -52,6 +49,7 @@ class AppShell extends StatelessWidget {
               ),
             ),
             Positioned.fill(child: SheetLayer(app: app)),
+            Positioned.fill(child: TaskModalLayer(app: app)),
             Positioned.fill(child: ModalLayer(app: app)),
             Positioned(
               left: 16,
@@ -181,27 +179,28 @@ class _RouteContentState extends State<_RouteContent> {
         if (entry == null) return const ColoredBox(color: AppColors.bg);
         return _frozen = KeyedSubtree(
           key: ValueKey((entry.id, entry.nav)),
-          child: buildScreen(app, entry, widget.onOpenDemo),
+          child: buildScreen(entry, widget.onOpenDemo),
         );
       },
     );
   }
 }
 
-Widget buildScreen(
-  CaseController app,
-  RouteEntry entry,
-  VoidCallback? onOpenDemo,
-) {
+Widget buildScreen(RouteEntry entry, VoidCallback? onOpenDemo) {
   return switch (entry.id) {
     ScreenId.home => HomeScreen(entry: entry, onOpenDemo: onOpenDemo),
-    ScreenId.transfer => TransferScreen(entry: entry),
-    ScreenId.plan => PlanScreen(entry: entry),
-    ScreenId.otp => OtpScreen(entry: entry),
-    ScreenId.limit => LimitScreen(entry: entry),
-    ScreenId.kyc => KycScreen(entry: entry),
-    ScreenId.result => ResultScreen(entry: entry),
+    ScreenId.products => ProductsScreen(entry: entry),
+    ScreenId.productList => ProductListScreen(entry: entry),
+    ScreenId.product => ProductScreen(entry: entry),
+    ScreenId.menu => MenuScreen(entry: entry),
+    ScreenId.joinConsent => JoinConsentScreen(entry: entry),
+    ScreenId.join => JoinScreen(entry: entry),
+    ScreenId.apply => ApplyScreen(entry: entry),
+    ScreenId.applyResult => ApplyResultScreen(entry: entry),
     ScreenId.support => SupportScreen(entry: entry),
-    ScreenId.chat => ChatScreen(entry: entry),
+    ScreenId.direct => DirectScreen(entry: entry),
+    ScreenId.assetConsent => AssetConsentScreen(entry: entry),
+    ScreenId.asset => AssetScreen(entry: entry),
+    ScreenId.explore => ExploreScreen(entry: entry),
   };
 }

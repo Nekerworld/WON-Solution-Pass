@@ -2,19 +2,29 @@ import 'package:flutter/foundation.dart';
 
 /// 화면 ID 허용목록. 이 목록 밖의 화면으로는 이동하지 않는다.
 enum ScreenId {
-  home,
-  transfer,
-  plan,
-  otp,
-  limit,
-  kyc,
-  result,
-  support,
-  chat;
+  home('home'),
+  products('products'),
+  productList('product-list'),
+  product('product'),
+  menu('menu'),
+  joinConsent('join-consent'),
+  join('join'),
+  apply('apply'),
+  applyResult('apply-result'),
+  support('support'),
+  direct('direct'),
+  assetConsent('asset-consent'),
+  asset('asset'),
+  explore('explore');
+
+  const ScreenId(this.webId);
+
+  /// 웹 프로토타입의 화면 ID
+  final String webId;
 
   static ScreenId? parse(String? id) {
     for (final s in ScreenId.values) {
-      if (s.name == id) return s;
+      if (s.webId == id || s.name == id) return s;
     }
     return null;
   }
