@@ -1,6 +1,6 @@
 /**
  * screens/home.js
- * 홈(계좌·진행 중 건·추천서비스), 상품몰, 입출금/예금/적금 목록, 상품 상세(AI와 함께 / 직접 가입 선택), 전체 메뉴.
+ * 홈(계좌·진행 중 건·추천서비스), 상품몰, 입출금/예금/적금 목록, 상품 상세(AI 가입), 전체 메뉴.
  * 실제 우리WON뱅킹 화면 배치를 따르되, 해결패스 기능이 없는 버튼은 data-action="noop" 으로 두어 눌러도 아무 일이 없다.
  */
 (function () {
@@ -110,12 +110,19 @@
 
       let accts = '';
       if (!r.ok) accts = '<div class="w-acct">' + UI.notice('계좌 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.', 'warning', I.alert) + '</div>';
-      else if (!r.data.hasDepositAccount)
+      else if (!r.data.hasDepositAccount) {
+        const who = r.data.customerName || '고객';
+        const linked = (WSP.store.getState().finance.linked || []).join('·');
         accts =
           '<div class="w-acct w-acct--empty"><div class="w-acct__head"><span class="w-acct__mark">' +
           BANK_MARK +
-          '</span><div class="w-acct__info"><strong>우리은행 계좌가 아직 없어요</strong><span>처음 거래하시는 고객님</span></div></div>' +
-          '<p class="w-acct__hint">상품에 가입하려면 입출금 계좌가 필요해요. 가입 지원에서 함께 만들 수 있어요.</p></div>';
+          '</span><div class="w-acct__info"><strong>' +
+          esc(who) +
+          '님, 우리은행은 처음이시네요</strong><span>' +
+          esc(linked) +
+          '는 연결되어 있어요</span></div></div>' +
+          '<p class="w-acct__hint">가입은 AI가 필요한 절차만 안내해요. 입출금 계좌도 그 안에서 함께 만들 수 있어요.</p></div>';
+      }
       else {
         accts = accountCard({ name: r.data.account.name, sub: '우리 ' + r.data.account.number, copy: true, balance: balanceHtml(hide, '0', ' 원'), transfer: true });
         if (r.data.fxAccount) accts += accountCard({ name: r.data.fxAccount.name, sub: '우리 ' + r.data.fxAccount.number, copy: true, tag: '외화', balance: balanceHtml(hide, '0.00', ' USD'), transfer: true });
@@ -200,15 +207,15 @@
         (hide ? ' is-on' : '') +
         '"><i></i></span></button></div></div>' +
         accts +
+        '<button class="w-ad" data-action="asset-start"><span class="w-ad__text"><strong>해외주식, 시작 금액 보기</strong></span><span class="w-ad__art">' +
+        sz(I.globe, 46) +
+        '</span></button>' +
         resume +
         '<button class="w-allacct" data-action="noop">전체계좌보기</button>' +
-        '<button class="w-ad" data-action="open-product" data-product="OVERSEAS_STOCK"><span class="w-ad__text"><strong>해외주식, 처음이라도 괜찮아요<br>계좌 개설부터 AI가 함께해요</strong><em>WON 해외주식 계좌 · 시연용 배너</em></span><span class="w-ad__art">' +
-        sz(I.globe, 46) +
-        '</span><span class="w-pager" data-action="noop">&lsaquo; 1 / 4 &rsaquo;</span></button>' +
         '<h3 class="w-h3">추천서비스</h3><div class="w-hscroll">' +
         '<div class="w-svc is-pink">' +
         svcItem('asset-start', I.target, 'blue', 'AI 자산관리 상담', '모을 돈과 투자할 돈을 함께 정해요') +
-        svcItem('go-products', I.product, 'violet', '상품 가입', 'AI와 함께 또는 직접 가입해요') +
+        svcItem('go-products', I.product, 'violet', '상품 가입', 'AI가 조건과 순서를 안내해요') +
         svcItem('noop', I.wallet, 'sky', '우리WON지갑', '모바일 신분증 등 생활 서비스') +
         '</div><div class="w-svc is-blue">' +
         svcItem('noop', I.phone, 'blue', '우리WON모바일', '은행이 만든 알뜰폰 통신') +
@@ -410,7 +417,6 @@
       s.ui.lastProduct = p.id;
       const ctx = params.from === 'asset' && s.asset && s.asset.handoffTerms ? s.asset.handoffTerms : null;
       const joinActive = app().fsms.join.state !== 'IDLE' && s.join && s.join.productId === p.id;
-      const directActive = app().fsms.direct.state !== 'IDLE' && s.direct && s.direct.productId === p.id;
       const isSavings = p.maxMonthly > 0;
       const rate = rateNum(p);
 
@@ -477,7 +483,7 @@
             esc(ctx.purpose) +
             (ctx.monthly ? ' · 월 ' + man(ctx.monthly) + (p.kind === 'BROKERAGE' ? ' 투자' : '') : '') +
             (ctx.months ? ' · ' + ctx.months + '개월' : '') +
-            '<br><span>상품을 고른 것은 가입이 아니에요. 아래 상품 가입에서 가입 방법을 고르면 가입 지원이 시작돼요.</span></p></div>'
+            '<br><span>상품을 고른 것은 가입이 아니에요. 아래 AI와 함께 가입을 누르면 가입 지원이 시작돼요.</span></p></div>'
           : '') +
         '<div class="w-pd__box">' +
         box +
@@ -513,12 +519,12 @@
         '</div>' +
         '<p class="w-pd__law"><strong>준법감시인 심의필</strong>경진대회 시연용 모의 화면으로 심의 번호가 없어요.</p>' +
         '</div>' +
-        '<div class="w-pd__foot"><button class="w-btn w-btn--soft" data-action="noop">상담</button><button class="w-btn" data-action="pd-join" data-product="' +
+        '<div class="w-pd__foot"><button class="w-btn w-btn--soft" data-action="noop">상담</button><button class="w-btn" data-action="join-start" data-product="' +
         p.id +
         '" data-from="' +
         (ctx ? 'asset' : '') +
         '">' +
-        (joinActive || directActive ? '이어서 가입' : '상품 가입') +
+        (joinActive ? '이어서 가입' : 'AI와 함께 가입') +
         '</button></div>'
       );
     },
@@ -540,37 +546,6 @@
       const sec = document.getElementById('pl-' + d.tab);
       if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
       el.parentNode.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('is-on', b === el));
-    },
-    'pd-join'(d) {
-      const s = app().session;
-      const joinActive = app().fsms.join.state !== 'IDLE' && s.join && s.join.productId === d.product;
-      const directActive = app().fsms.direct.state !== 'IDLE' && s.direct && s.direct.productId === d.product;
-      const p = SC.getProduct(d.product);
-      UI.openSheet(
-        '<div class="w-sheet"><h3>' +
-          esc(p.name) +
-          '<br>가입 방법을 골라 주세요</h3>' +
-          '<button class="join-choice__item is-ai" data-action="pd-choose" data-next="join-start" data-product="' +
-          p.id +
-          '" data-from="' +
-          (d.from || '') +
-          '"><span class="join-choice__icon">' +
-          I.spark +
-          '</span><strong>' +
-          (joinActive ? 'AI 가입 지원 이어서 하기' : 'AI와 함께 가입') +
-          '</strong><span>부족한 조건과 해결 순서를 확인하고, 필요한 업무 화면을 바로 열어 드려요</span></button>' +
-          '<button class="join-choice__item" data-action="pd-choose" data-next="direct-start" data-product="' +
-          p.id +
-          '"><span class="join-choice__icon">' +
-          I.doc +
-          '</span><strong>' +
-          (directActive ? '직접 가입 이어서 하기' : '직접 가입') +
-          '</strong><span>기존 가입 화면을 단계별로 직접 진행해요</span></button></div>'
-      );
-    },
-    'pd-choose'(d) {
-      UI.closeSheet(true);
-      app().dispatch(d.next, { product: d.product, from: d.from || '' });
     },
   });
 

@@ -273,6 +273,60 @@
         { id: 'sign', label: '전자서명', checks: ['CERT'] },
       ],
     },
+    {
+      id: 'DOMESTIC_STOCK',
+      name: 'WON 국내주식 계좌',
+      type: '국내주식',
+      rate: '수수료 0.015%',
+      summary: '국내 주식을 사고팔 수 있는 투자 계좌',
+      goalTags: ['국내주식'],
+      periods: [],
+      minMonthly: 0,
+      maxMonthly: 0,
+      conditions: ['ADULT', 'IDENTITY', 'ACCOUNT', 'CERT'],
+      directSteps: [
+        { id: 'terms', label: '상품 안내·약관 동의', checks: [] },
+        { id: 'identity', label: '본인 확인', checks: ['ADULT', 'IDENTITY'] },
+        { id: 'account', label: '연결 계좌 선택', checks: ['ACCOUNT'] },
+        { id: 'sign', label: '전자서명', checks: ['CERT'] },
+      ],
+    },
+    {
+      id: 'GOLD',
+      name: 'WON 골드 통장',
+      type: '금',
+      rate: '수수료 1.0%',
+      summary: '금을 적립하고 보관하는 통장',
+      goalTags: ['금'],
+      periods: [],
+      minMonthly: 0,
+      maxMonthly: 0,
+      conditions: ['ADULT', 'IDENTITY', 'ACCOUNT', 'CERT'],
+      directSteps: [
+        { id: 'terms', label: '상품 안내·약관 동의', checks: [] },
+        { id: 'identity', label: '본인 확인', checks: ['ADULT', 'IDENTITY'] },
+        { id: 'account', label: '연결 계좌 선택', checks: ['ACCOUNT'] },
+        { id: 'sign', label: '전자서명', checks: ['CERT'] },
+      ],
+    },
+    {
+      id: 'US_ETF',
+      name: 'WON 미국ETF 적립',
+      type: '적립',
+      rate: '수수료 0.1%',
+      summary: '미국 ETF를 매달 나누어 사는 적립',
+      goalTags: ['미국ETF'],
+      periods: [],
+      minMonthly: 0,
+      maxMonthly: 0,
+      conditions: ['ADULT', 'IDENTITY', 'ACCOUNT', 'CERT'],
+      directSteps: [
+        { id: 'terms', label: '상품 안내·약관 동의', checks: [] },
+        { id: 'identity', label: '본인 확인', checks: ['ADULT', 'IDENTITY'] },
+        { id: 'account', label: '연결 계좌 선택', checks: ['ACCOUNT'] },
+        { id: 'sign', label: '전자서명', checks: ['CERT'] },
+      ],
+    },
   ]);
 
   const SOURCE_LABEL = Object.freeze({ BANK: '조회', STATED: '고객 답변', ESTIMATED: '추정', UNKNOWN: '미확인' });
@@ -281,16 +335,16 @@
     customer: {
       name: '김우리',
       age: 29,
-      firstTimeCustomer: true,
+      firstTimeCustomer: false,
       /** 로그인 시 확인된 정보: 다시 묻지 않는다 */
       mobileOwnerVerified: true,
     },
     facts: {
       adult: true,
-      identityVerified: false,
-      hasDepositAccount: false,
-      certRegistered: false,
-      kycDone: false,
+      identityVerified: true,
+      hasDepositAccount: true,
+      certRegistered: true,
+      kycDone: true,
       fxRegistered: false,
       hasFxAccount: false,
       investorProfiled: false,
@@ -326,18 +380,13 @@
     system: { bankAvailable: true, stateVersion: 1 },
   });
 
-  /** 발표용 통합 시나리오: 처음 거래하는 고객의 해외주식 계좌 개설 */
+  /** 발표용 통합 시나리오: 계좌가 있는 고객의 해외주식 계좌 개설 */
   const DEMO = Object.freeze({
-    title: '처음 거래하는 고객의 해외주식 계좌 개설',
+    title: '계좌가 있는 고객의 해외주식 계좌 개설',
     productId: 'OVERSEAS_STOCK',
-    customerAnswers: [
-      ['실물 신분증', '없음'],
-      ['모바일 신분증', '있음'],
-    ],
-    givens: ['우리은행 계좌·인증서 없음', '다른 은행 계좌 있음(마이데이터 연결)', '고객정보·투자성향 미등록'],
+    customerAnswers: [],
+    givens: ['우리은행 계좌·인증서·고객정보 있음', '외환거래·외화 계좌·투자성향 없음'],
     stages: [
-      { id: 'ACCOUNT', label: '계좌 개설', facts: ['identityVerified', 'hasDepositAccount'] },
-      { id: 'AUTH', label: '인증', facts: ['certRegistered', 'kycDone'] },
       { id: 'FX', label: '외환거래', facts: ['fxRegistered'] },
       { id: 'FX_ACCOUNT', label: '해외계좌', facts: ['hasFxAccount'] },
       { id: 'STOCK', label: '주식계좌', facts: ['investorProfiled'], application: 'OVERSEAS_STOCK' },
@@ -365,5 +414,5 @@
     getProduct: getProduct,
   };
 
-  WSP.store = WSP.createStore(initialBankState, { storageKey: 'wsp.bankState.v3' });
+  WSP.store = WSP.createStore(initialBankState, { storageKey: 'wsp.bankState.v4' });
 })();

@@ -174,7 +174,6 @@
       if (!a || !a.handoffTerms || (af().state !== 'EXPLORE' && af().state !== 'TO_JOIN'))
         return UI.appbar('상품 둘러보기') + '<div class="screen-body"><p class="lead">상담에서 정한 방향이 없어요.</p><button class="btn btn--primary" data-action="go-products">전체 상품 보기</button></div>';
       const t = a.handoffTerms;
-      const list = AA.matchProducts({ tags: t.tags, months: t.months, monthly: t.monthly });
       return (
         UI.appbar('상품 둘러보기') +
         '<div class="screen-body">' +
@@ -187,23 +186,17 @@
         '</strong>' +
         (t.goalText ? '<small>"' + esc(t.goalText) + '"</small>' : '') +
         '</div>' +
-        '<p class="lead">정한 방향에 맞는 상품이에요.</p>' +
-        list
-          .map((m) => {
-            const p = SC.getProduct(m.productId);
+        SC.PRODUCTS.map((p) => {
             return (
               '<div class="product-card is-static"><div class="product-card__top">' +
               UI.badge(p.type, 'info') +
-              (m.fit ? UI.badge('방향과 맞음', 'success') : UI.badge('일부 조건 다름', 'neutral')) +
               '<span class="product-card__rate">' +
               esc(p.rate) +
               '</span></div><strong>' +
               esc(p.name) +
               '</strong><span>' +
               esc(p.summary) +
-              '</span><ul class="product-card__notes">' +
-              m.notes.map((n) => '<li>' + esc(n) + '</li>').join('') +
-              '</ul><button class="btn btn--secondary btn--sm" data-action="asset-select-product" data-product="' +
+              '</span><button class="btn btn--secondary btn--sm" data-action="asset-select-product" data-product="' +
               p.id +
               '">이 상품 보기</button></div>'
             );

@@ -98,6 +98,15 @@
     d.facts.identityVerified = false;
   };
 
+  /** 계좌가 없는 첫 거래 고객. 기본 시연 고객은 계좌·인증서·고객정보가 있다. */
+  function asNewCustomer(d) {
+    d.customer.firstTimeCustomer = true;
+    d.facts.identityVerified = false;
+    d.facts.hasDepositAccount = false;
+    d.facts.certRegistered = false;
+    d.facts.kycDone = false;
+  }
+
   /* ---------- 테스트 ---------- */
   const TESTS = [];
   const t = (name, fn) => TESTS.push({ name: name, fn: fn });
@@ -118,7 +127,7 @@
   });
 
   t('고객 제약에 따라 경로가 걸러짐 (신분증 없음 → 모바일 신분증)', async () => {
-    fresh();
+    fresh(asNewCustomer);
     const ev = RE.evaluate(PID, await bank.checkConditions(PID));
     const r1 = PF.computeRoute(ev, { hasIdCard: false, hasMobileId: true, hasOtherBankAccount: true });
     assert(r1.status === 'PLAN' && r1.steps[0].actionId === 'MOBILE_ID_VERIFY', '첫 단계 ' + (r1.steps[0] || {}).actionId);
@@ -130,7 +139,7 @@
   });
 
   t('필요한 경우에만 질문 (P4): 모르는 사정은 질문 목록, 확인된 경로가 있으면 질문 없음', async () => {
-    fresh();
+    fresh(asNewCustomer);
     const ev = RE.evaluate(PID, await bank.checkConditions(PID));
     const r1 = PF.computeRoute(ev, { hasIdCard: null, hasMobileId: null, hasOtherBankAccount: true });
     assert(r1.questions[0] === 'hasIdCard', '질문 ' + r1.questions.join(','));
@@ -139,7 +148,10 @@
   });
 
   t('순환(계좌↔인증서) 감지 → 상담 전환', async () => {
-    fresh((d) => (d.finance.otherBankAccounts = []));
+    fresh((d) => {
+      asNewCustomer(d);
+      d.finance.otherBankAccounts = [];
+    });
     await startJoin({ hasIdCard: false, hasMobileId: true, hasOtherBankAccount: false });
     assert(jf().state === 'ESCALATED', '상태 ' + jf().state);
     const e = WSP.app.session.join.escalation;
@@ -148,7 +160,7 @@
   });
 
   t('은행이 아는 정보(다른 은행 계좌·휴대폰 명의)는 다시 묻지 않음', async () => {
-    fresh();
+    fresh(asNewCustomer);
     await startJoin({ hasIdCard: false, hasMobileId: true });
     const j = WSP.app.session.join;
     assert(j.constraintSource.hasOtherBankAccount.source === 'BANK', '다른 은행 계좌 출처');
@@ -157,7 +169,7 @@
   });
 
   t('모달을 닫기만 하면 완료로 판정하지 않음', async () => {
-    fresh();
+    fresh(asNewCustomer);
     await startJoin();
     assert(jf().state === 'OPTIONS_READY', '시작 상태 ' + jf().state);
     await doTask('ID_CARD_VERIFY', false);
@@ -219,7 +231,7 @@
   });
 
   t('AI 가입 지원 주 경로: 신분증 없음 → 모바일 신분증 → 계좌 → 인증서·고객정보 → 승인 → 완료', async () => {
-    fresh();
+    fresh(asNewCustomer);
     await startJoin({ hasIdCard: false, hasMobileId: true });
     const order = [];
     for (let i = 0; i < 6 && (jf().state === 'OPTIONS_READY' || jf().state === 'REMAINING'); i++) {
@@ -257,21 +269,23 @@
     await F.accept();
     F.nextAction('explore');
     assert(af().state === 'EXPLORE', '상태 ' + af().state);
-    const list = AA.matchProducts(a.handoffTerms);
-    assert(list.length === 1 && list[0].productId === SC.DEMO.productId, '추천 상품 ' + list.map((x) => x.productId));
+    const ids = SC.PRODUCTS.map((p) => p.id);
+    assert(ids[0] === SC.DEMO.productId && ids.length >= 4, '상품 목록 ' + ids.join(','));
+    assert(a.chat.filter((m) => m.kind === 'interpret').length === 1, '숫자 설명이 한 번이 아님');
+    assert(!a.chat.some((m) => /기준으로 계산/.test(m.text)), '목표를 되풀이하는 문장이 남음');
   });
 
-  t('통합 시나리오 가입: 신분증 없음 → 숨은 선행조건 7단계 → 투자성향은 주식계좌 직전 → 승인 → 개설', async () => {
+  t('통합 시나리오 가입: 이미 있는 계좌 → 외환·외화계좌·투자성향 → 승인 → 개설', async () => {
     fresh();
-    await startJoin({ hasIdCard: false, hasMobileId: true }, SC.DEMO.productId);
-    assert(WSP.app.session.join.questionsAsked === 2, '질문 ' + WSP.app.session.join.questionsAsked);
+    await startJoin({}, SC.DEMO.productId);
+    assert(WSP.app.session.join.questionsAsked === 0, '질문 ' + WSP.app.session.join.questionsAsked);
     const order = [];
-    for (let i = 0; i < 10 && (jf().state === 'OPTIONS_READY' || jf().state === 'REMAINING'); i++) {
+    for (let i = 0; i < 6 && (jf().state === 'OPTIONS_READY' || jf().state === 'REMAINING'); i++) {
       const next = WSP.app.session.join.route.steps[0].actionId;
       order.push(next);
       await doTask(next, true);
     }
-    const expected = ['MOBILE_ID_VERIFY', 'OPEN_ACCOUNT_OTHERBANK', 'ISSUE_CERT', 'KYC_UPDATE', 'FX_REGISTER', 'OPEN_FX_ACCOUNT', 'INVESTOR_PROFILE'];
+    const expected = ['FX_REGISTER', 'OPEN_FX_ACCOUNT', 'INVESTOR_PROFILE'];
     assert(order.join() === expected.join(), '업무 순서 ' + order.join(','));
     assert(jf().state === 'READY_TO_APPLY', '준비 상태 ' + jf().state);
     await J().approve({ market: '미국', account: 'WON 통장', fxAccount: 'WON 외화통장(USD)' });

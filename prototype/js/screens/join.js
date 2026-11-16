@@ -48,41 +48,48 @@
   });
 
   /* ---------- 대화 + 체크리스트 ---------- */
+  let seenTimer = 0;
   function checklist(j) {
     const ev = j.evaluation;
-    let rows;
-    if (!ev) rows = '<li class="ck__row"><span>은행 기록 확인 전</span>' + UI.badge('대기', 'neutral') + '</li>';
-    else rows = ev.conditions.map((c) => '<li class="ck__row"><span>' + esc(c.label) + '</span>' + UI.condBadge(c.status) + '</li>').join('');
+    const ids = ev ? ev.conditions.map((c) => c.id) : SC.getProduct(j.productId).conditions;
+    const byId = {};
+    if (ev) ev.conditions.forEach((c) => (byId[c.id] = c));
+    const seen = j.seenMet || [];
+    const entered = !!j.listSeen;
     const met = ev ? ev.conditions.filter((c) => c.status === 'MET').length : 0;
-    const total = ev ? ev.conditions.length : SC.getProduct(j.productId).conditions.length;
-    const st = jf().state;
-    let plan = '';
-    const r = j.route;
-    if (r && r.status === 'PLAN' && ['OPTIONS_READY', 'REMAINING', 'TASK_OPEN', 'CLARIFYING'].indexOf(st) !== -1) {
-      plan =
-        '<div class="ck__plan"><span class="ck__plan-title">' +
-        I.route +
-        '해결 순서</span><ol>' +
-        r.steps.map((s, i) => '<li class="' + (i === 0 ? 'is-current' : '') + '">' + esc(s.label) + '</li>').join('') +
-        '</ol></div>';
-    }
-    const ready = st === 'READY_TO_APPLY';
+    const rows = ids
+      .map((id, i) => {
+        const c = byId[id];
+        const cond = SC.CONDITIONS[id];
+        const fact = cond && SC.FACTS[cond.fact];
+        const label = fact ? fact.short : cond ? cond.label : id;
+        const isMet = !!(c && c.status === 'MET');
+        const fresh = isMet && seen.indexOf(id) === -1;
+        return (
+          '<li class="ck__row' +
+          (isMet ? ' is-met' : '') +
+          (fresh ? ' is-new' : '') +
+          (entered ? '' : ' is-in') +
+          '"' +
+          (entered ? '' : ' style="animation-delay:' + i * 80 + 'ms"') +
+          '><i class="ck__tick" aria-hidden="true"></i><span>' +
+          esc(label) +
+          '</span></li>'
+        );
+      })
+      .join('');
     return (
       '<div class="ck' +
-      (ready ? ' is-ready' : '') +
+      (jf().state === 'READY_TO_APPLY' ? ' is-ready' : '') +
       '"><div class="ck__head"><strong>가입 조건 ' +
       met +
       '/' +
-      total +
+      ids.length +
       '</strong><span class="ck__product">' +
       esc(SC.getProduct(j.productId).name) +
-      '</span></div><div class="ck__bar"><i style="width:' +
-      Math.round((met / total) * 100) +
-      '%"></i></div><ul>' +
+      '</span></div><ul>' +
       rows +
-      '</ul>' +
-      plan +
-      '</div>'
+      '</ul></div>'
     );
   }
 
@@ -212,6 +219,14 @@
       );
     },
     mount(el, params, ctx) {
+      clearTimeout(seenTimer);
+      seenTimer = setTimeout(() => {
+        seenTimer = 0;
+        const j = app().session.join;
+        if (!j) return;
+        j.listSeen = true;
+        j.seenMet = j.evaluation ? j.evaluation.conditions.filter((c) => c.status === 'MET').map((c) => c.id) : j.seenMet || [];
+      }, 700);
       UI.scrollToLatest(el.querySelector('#join-body'));
       if (ctx && ctx.first) WSP.joinFlow.resume();
     },

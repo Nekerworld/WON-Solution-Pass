@@ -157,11 +157,12 @@
   const BOT_FACE =
     '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="9" width="22" height="17" rx="8" fill="#e8f1fe"/><rect x="5" y="9" width="22" height="17" rx="8" fill="none" stroke="#2488f3" stroke-width="1.6"/><circle cx="12.5" cy="17.5" r="1.8" fill="#2488f3"/><circle cx="19.5" cy="17.5" r="1.8" fill="#2488f3"/><path d="M16 9V5.5" stroke="#2488f3" stroke-width="1.6" stroke-linecap="round"/><circle cx="16" cy="4.5" r="1.6" fill="#2488f3"/></svg>';
 
-  function renderMessage(m) {
-    if (m.role === 'user') return '<div class="msg msg--user"><div class="msg__say">"' + esc(m.text) + '"</div>' + clock(m.at) + '</div>';
-    if (m.role === 'system') return '<div class="msg-sys' + (m.tone ? ' is-' + m.tone : '') + '">' + (m.tone === 'warning' ? I.alert : I.info) + '<span>' + esc(m.text) + '</span></div>';
+  function renderMessage(m, rise) {
+    const fresh = rise ? ' is-in' : '';
+    if (m.role === 'user') return '<div class="msg msg--user' + fresh + '"><div class="msg__say">"' + esc(m.text) + '"</div>' + clock(m.at) + '</div>';
+    if (m.role === 'system') return '<div class="msg-sys' + (m.tone ? ' is-' + m.tone : '') + fresh + '">' + (m.tone === 'warning' ? I.alert : I.info) + '<span>' + esc(m.text) + '</span></div>';
     return (
-      '<div class="msg msg--bot"><span class="msg__avatar">' +
+      '<div class="msg msg--bot' + fresh + '"><span class="msg__avatar">' +
       BOT_FACE +
       '</span><div class="msg__card' +
       (m.tone === 'warning' ? ' is-warning' : '') +
@@ -177,8 +178,9 @@
   }
 
   function chatLog(messages, thinking) {
+    const list = messages || [];
     return (
-      (messages || []).map(renderMessage).join('') +
+      list.map((m, i) => renderMessage(m, i === list.length - 1 && m.at && Date.now() - m.at < 800)).join('') +
       (thinking ? '<div class="thinking" aria-label="AI가 생각하는 중"><span class="msg__avatar">' + BOT_FACE + '</span><span class="thinking__dots"><i></i><i></i><i></i></span>AI가 확인하고 있어요</div>' : '')
     );
   }
@@ -191,7 +193,9 @@
     return (
       '<header class="appbar chat-head"><button class="icon-btn" data-action="back" aria-label="뒤로 가기">' +
       I.back +
-      '</button><div class="appbar__title">AI챗봇과 대화중</div><span class="chat-head__ai" aria-hidden="true">AI<small>챗봇</small></span></header>' +
+      '</button><div class="appbar__title">' +
+      esc(WSP.store.getState().customer.name) +
+      '님의 해결패스</div><span class="chat-head__ai" aria-hidden="true">AI<small>챗봇</small></span></header>' +
       '<div class="chat-tools"><button data-action="noop">' +
       I.msg +
       '톡상담</button><button data-action="noop">' +
@@ -205,7 +209,13 @@
   /** 대화 시작 머리말: 날짜, 연결 안내, 인사 */
   function chatIntro(service, startedAt) {
     const d = new Date(startedAt || Date.now());
-    const name = WSP.store.getState().customer.name;
+    const st = WSP.store.getState();
+    const name = st.customer.name;
+    const linked = (st.finance && st.finance.linked) || [];
+    const linkText = linked.length > 1 ? linked[0] + '이랑 ' + linked.slice(1).join(', ') : linked[0] || '연결된 기관';
+    const hello = st.customer.firstTimeCustomer
+      ? esc(name) + ' 고객님, 우리은행은 처음이시네요.<br>' + esc(linkText) + '는 연결되어 있어서 그 내역으로 바로 볼게요.'
+      : esc(name) + ' 고객님, 안녕하세요.<br>' + esc(linkText) + ' 내역으로 바로 볼게요.';
     return (
       '<div class="chat-intro"><span class="chat-intro__date">' +
       d.getFullYear() +
@@ -218,8 +228,8 @@
       '이 연결되었습니다.</span><div class="chat-intro__hello"><span class="msg__avatar">' +
       BOT_FACE +
       '</span><h2>' +
-      esc(name) +
-      ' 고객님, 안녕하세요.<br>우리은행 AI챗봇입니다.</h2></div></div>'
+      hello +
+      '</h2></div></div>'
     );
   }
 

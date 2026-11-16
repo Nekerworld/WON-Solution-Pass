@@ -161,19 +161,27 @@
 
   function joinExplainCheck(evaluation, route) {
     return run('가입 조건 설명', { conditions: evaluation.conditions.map((c) => c.id + ':' + c.status), route: route.status }, {}, () => {
+      const cust = WSP.store.getState();
+      const name = cust.customer.name;
+      const acct = cust.finance.otherBankAccounts && cust.finance.otherBankAccounts[0];
       const unmet = evaluation.conditions.filter((c) => c.status !== 'MET');
       const met = evaluation.conditions.filter((c) => c.status === 'MET');
+      const needsIdentity = unmet.some((c) => c.fact === 'identityVerified');
       let message;
-      if (!unmet.length) message = '가입 조건을 모두 갖추셨어요. 가입 정보를 확인하고 승인만 하시면 돼요.';
-      else
+      if (!unmet.length) message = name + ' 고객님은 가입 조건을 모두 갖추셨어요. 가입 정보를 확인하고 승인만 하시면 돼요.';
+      else if (!cust.facts.hasDepositAccount && needsIdentity) {
+        message = name + ' 고객님은 우리 계좌가 없어서 실명확인부터예요.';
+        if (acct) message += ' ' + acct.bank + ' 계좌는 이미 알고 있어서 다시 묻지 않을게요.';
+      } else
         message =
-          '은행 기록을 확인해 보니 ' +
+          name +
+          ' 고객님, ' +
           (met.length ? josa(met.map((c) => c.label).join(', '), '은') + ' 이미 충족했고, ' : '') +
           '가입 전에 ' +
           unmet.length +
           '가지(' +
           unmet.map((c) => c.label).join(', ') +
-          ')가 더 필요해요. 처음 거래하시는 분께 흔한 상황이에요.';
+          ')가 더 필요해요.';
       return { intent: 'EXPLAIN_CONDITIONS', message: message, actions: [{ type: 'EXPLAIN', text: message }] };
     });
   }
@@ -212,12 +220,10 @@
   function joinPresent(route, evaluation) {
     const allowed = route.options.map((o) => o.actionId);
     return run('해결 방법 안내', { steps: route.steps.map((s) => s.actionId), options: allowed }, { allowedActionIds: allowed }, () => {
-      const first = WSP.pathfinder.getAction(route.steps[0].actionId);
-      const fact = Object.keys(first.effects)[0];
       const order = route.steps.map((s, i) => i + 1 + '. ' + s.label).join('\n');
       const usable = route.options.filter((o) => o.availability !== 'BLOCKED' && o.reachable);
-      let message = '지금 할 수 있는 순서는 아래와 같아요. 먼저 ' + factLabel(fact) + '부터 진행해요.';
-      if (usable.length > 1) message += ' 방법이 ' + usable.length + '가지 있으니 편한 쪽을 고르세요.';
+      let message = route.steps[0].label;
+      if (usable.length > 1) message += '\n편한 방법을 골라 주세요.';
       return {
         intent: 'PRESENT_OPTIONS',
         message: message,
@@ -278,9 +284,13 @@
       const amount = parseAmount(text);
       if (months) actions.push({ type: 'SET_INFO', key: 'goalMonths', value: months, source: 'STATED' });
       if (amount) actions.push({ type: 'SET_INFO', key: 'goalAmount', value: amount, source: 'STATED' });
+      const name = WSP.store.getState().customer.name;
       const label = AA().PURPOSES[purpose].label;
-      const message =
-        "'" + label + "' 상담으로 이해했어요." + (months ? ' 기간은 ' + josa(AA().display('goalMonths', months), '로') + ' 볼게요.' : '') + (amount ? ' 목표 금액은 ' + man(amount) + '이에요.' : '');
+      const bits = [];
+      if (purpose !== 'INVEST') bits.push(name + ' 고객님의 ' + label + ' 기준으로 볼게요.');
+      if (months) bits.push('기간은 ' + josa(AA().display('goalMonths', months), '로') + ' 볼게요.');
+      if (amount) bits.push('목표 금액은 ' + man(amount) + '이에요.');
+      const message = bits.join(' ');
       return { intent: 'SET_PURPOSE', purpose: purpose, message: message, actions: actions };
     });
   }
@@ -288,12 +298,15 @@
   function assetInterpret(metrics) {
     return run('지표 해석', { metrics: metrics.list.map((m) => m.key + '=' + m.value) }, {}, () => {
       const b = metrics.byKey;
-      const parts = [];
-      if (b.surplus.value != null) parts.push('매달 약 ' + josa(b.surplus.text, '이') + ' 남고, 그중 무리 없이 모을 수 있는 돈은 월 ' + b.capacity.text + ' 정도예요');
-      if (b.emergencyMonths.value != null) parts.push('바로 쓸 수 있는 예금은 생활비 ' + b.emergencyMonths.text + '치예요');
-      if (b.needMonthly.value != null)
-        parts.push('목표를 채우려면 매달 ' + josa(b.needMonthly.text, '이') + ' 필요해요' + (metrics.feasible === false ? '. 지금 여유보다 많아서 조정이 필요해요' : ''));
-      const message = parts.length ? parts.join('. ') + '.' : '지금 정보로는 계산할 수 있는 게 많지 않아요.';
+      const fin = WSP.store.getState().finance;
+      const income = fin && fin.items && fin.items.monthlyIncome;
+      let message;
+      if (b.surplus.value != null && income && income.value != null) {
+        message = '최근 급여 6개월 평균으로 소득은 월 ' + man(income.value) + ', 평균 지출을 빼면 매달 ' + b.surplus.text + '이 남아요.';
+      } else if (b.surplus.value != null) message = '매달 ' + b.surplus.text + '이 남아요.';
+      else if (b.needMonthly.value != null)
+        message = '목표를 채우려면 매달 ' + josa(b.needMonthly.text, '이') + ' 필요해요' + (metrics.feasible === false ? '. 지금 여유보다 많아서 조정이 필요해요' : '') + '.';
+      else message = '지금 정보로는 계산할 수 있는 게 많지 않아요.';
       return { intent: 'INTERPRET', message: message, actions: [{ type: 'EXPLAIN', text: message }] };
     });
   }
@@ -360,8 +373,8 @@
       if (basis.monthly == null) text = '지금 정보로는 월 적립액을 계산하기 어려워요.';
       else if (basis.purposeId === 'INVEST') {
         text =
-          (b.reserve.value != null ? '생활비 ' + SC.POLICY.emergencyMonths + '개월치인 ' + josa(b.reserve.text, '은') + ' 예금으로 남겨 두고, ' : '') +
-          '매달 ' + man(basis.monthly) + ' 정도로 해외주식 투자를 시작해 보시는 걸 제안해요. 투자는 원금 손실이 날 수 있어서, 무리 없이 모을 수 있는 돈의 절반만 잡았어요.';
+          (b.reserve.value != null ? josa(b.reserve.text, '은') + ' 예금으로 두고, ' : '') +
+          '매달 ' + man(basis.monthly) + '으로 시작하시는 걸 제안해요. 투자는 원금 손실이 날 수 있어요.';
       } else {
         text = '매달 ' + man(basis.monthly) + '씩' + (basis.months ? ' ' + AA().display('goalMonths', basis.months) + ' 동안' : '') + ' 모아 보시는 걸 제안해요.';
         if (b.expectedAmount.value != null) text += ' 기간이 끝나면 약 ' + josa(man(b.expectedAmount.value), '이') + ' 모여요.';

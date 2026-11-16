@@ -65,8 +65,25 @@
     if (j.chat.length > 80) j.chat.shift();
   }
 
-  function sayAI(res, extra) {
-    push(Object.assign({ role: 'ai', text: res.output.message, fallback: res.fallback, errors: res.errors }, extra || {}));
+  function loadMs(text) {
+    const len = String(text || '').replace(/\s/g, '').length;
+    return Math.min(5000, Math.max(800, len * 45)) * bank.getLatencyScale();
+  }
+
+  async function sayAI(res, extra) {
+    const ep = A().epoch();
+    const text = res.output.message;
+    const wait = loadMs(text);
+    if (wait > 0) {
+      think(true);
+      await WSP.utils.sleep(wait);
+      if (stale(ep)) return false;
+    }
+    if (!S()) return false;
+    S().thinking = false;
+    push(Object.assign({ role: 'ai', text: text, fallback: res.fallback, errors: res.errors }, extra || {}));
+    A().refresh(SCREENS);
+    return true;
   }
 
   function sayUser(text) {
@@ -227,10 +244,8 @@
       j.skipped.push({ label: '다른 은행 계좌', reason: '마이데이터로 확인됨 (' + a.bank + ')' });
     }
     if (j.skipped.length) WSP.events.add('AI', '묻지 않은 질문: ' + j.skipped.map((s) => s.label + '(' + s.reason + ')').join(', '));
-    const ai = await AI.join.explainCheck(j.evaluation, { status: '-' });
     if (stale(ep)) return;
     think(false);
-    sayAI(ai, { kind: 'check' });
     fsm().transition(j.evaluation.allMet ? 'NONE_MISSING' : 'MISSING', { unmet: j.evaluation.unmet });
   }
 
@@ -270,7 +285,7 @@
     j.pendingKey = key;
     j.questionsAsked += 1;
     j.metrics.questions += 1;
-    sayAI(ai, { kind: 'question', key: key, why: ai.output.why || AI.CONSTRAINT_WHY[key] });
+    await sayAI(ai, { kind: 'question', key: key, why: ai.output.why || AI.CONSTRAINT_WHY[key] });
     return true;
   }
 
@@ -290,7 +305,7 @@
     const ai = await AI.join.explainNoRoute(route.cause);
     if (stale(ep)) return;
     think(false);
-    sayAI(ai, { kind: 'noroute', tone: 'warning' });
+    await sayAI(ai, { kind: 'noroute', tone: 'warning' });
     escalate(route.cause && route.cause.type === 'CYCLE' ? 'CYCLE' : 'NO_ROUTE', ai.output.message, route.cause);
     fsm().transition(event, { cause: route.cause });
   }
@@ -325,7 +340,7 @@
       });
     });
     j.presentedKey = key;
-    sayAI(ai, { kind: 'options', plan: route.steps.map((s) => s.label) });
+    await sayAI(ai, { kind: 'options', plan: route.steps.map((s) => s.label) });
   }
 
   /* ---------------- 고객 입력 ---------------- */
@@ -344,20 +359,20 @@
     const out = ai.output;
     const types = out.actions.map((a) => a.type);
     if (types.indexOf('ESCALATE') !== -1) {
-      sayAI(ai);
+      await sayAI(ai);
       return requestConsult('CUSTOMER_REQUEST', '고객이 상담 연결을 요청했어요.');
     }
     if (types.indexOf('END') !== -1) {
-      sayAI(ai);
+      await sayAI(ai);
       return exit();
     }
     if (out.intent === 'REPORT_MISMATCH') {
-      sayAI(ai);
+      await sayAI(ai);
       return reportMismatch();
     }
     const sets = out.actions.filter((a) => a.type === 'SET_CONSTRAINT');
     if (!sets.length) {
-      sayAI(ai);
+      await sayAI(ai);
       A().refresh(SCREENS);
       return;
     }
@@ -489,29 +504,28 @@
       const ai = await AI.join.afterRecheck('EXCEPTION');
       if (stale(ep)) return;
       think(false);
-      sayAI(ai, { tone: 'warning' });
+      await sayAI(ai, { tone: 'warning' });
       fsm().transition('EXCEPTION', { cause: cause });
       return;
     }
     j.currentTask = null;
     j.exception = null;
     if (ev.allMet) {
-      const ai = await AI.join.afterRecheck('ALL_MET');
       if (stale(ep)) return;
       think(false);
-      sayAI(ai, { kind: 'ready' });
       fsm().transition('ALL_MET');
       return;
     }
     let detail = '';
     if (status === 'CANCELLED') detail = '업무를 마치지 않고 닫으셨어요.';
     else if (status === 'PARTIAL') detail = '일부 단계만 저장돼서 아직 완료되지 않았어요.';
-    else if (ct && status === 'COMPLETED') detail = WSP.utils.josa(SC.getTask(ct.taskId).label, '이') + ' 은행 기록에 반영됐어요.';
     const remain = ev.conditions.filter((x) => x.status !== 'MET').map((x) => x.label);
-    const ai = await AI.join.afterRecheck('REMAINING', detail + ' 남은 조건은 ' + WSP.utils.josa(remain.join(', '), '이에요') + '.');
-    if (stale(ep)) return;
-    think(false);
-    sayAI(ai);
+    if (detail) {
+      const ai = await AI.join.afterRecheck('REMAINING', detail + ' 남은 조건은 ' + WSP.utils.josa(remain.join(', '), '이에요') + '.');
+      if (stale(ep)) return;
+      think(false);
+      await sayAI(ai);
+    } else think(false);
     fsm().transition('REMAINING', { remain: ev.unmet });
   }
 

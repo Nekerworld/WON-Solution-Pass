@@ -51,15 +51,18 @@
     if (a.chat.length > 80) a.chat.shift();
   }
 
-  // 메시지가 한꺼번에 쌓이면 고객이 스크롤을 올려 다시 읽어야 하므로, 이어지는 안내 사이에 최소 간격을 둔다 (시연 패널 속도 배율 적용)
-  const GAP_MS = 3000;
-  let lastSaidAt = 0;
+  // 글이 길수록 더 기다린 뒤 페이드로 보여 준다. 한 메시지는 5초를 넘기지 않는다.
   let pacing = 0;
+
+  function loadMs(text) {
+    const len = String(text || '').replace(/\s/g, '').length;
+    return Math.min(5000, Math.max(800, len * 45)) * bank.getLatencyScale();
+  }
 
   /** @returns {Promise<boolean>} 기다리는 동안 데모가 초기화됐으면 false */
   async function say(msg) {
     const ep = A().epoch();
-    const wait = lastSaidAt + GAP_MS * bank.getLatencyScale() - Date.now();
+    const wait = loadMs(msg.text);
     if (wait > 0) {
       pacing += 1;
       think(true);
@@ -67,9 +70,9 @@
       pacing -= 1;
       if (stale(ep)) return false;
     }
+    if (!S()) return false;
     S().thinking = false;
     push(msg);
-    lastSaidAt = Date.now();
     A().refresh(SCREENS);
     return true;
   }
@@ -101,9 +104,8 @@
   function agree() {
     if (fsm().state !== 'CONSENT') return;
     fsm().transition('AGREE');
-    push({ role: 'ai', text: '어떤 목표로 상담받고 싶으세요? 편하게 말씀해 주세요. 예: "2년 뒤 결혼 자금 모으고 싶어요"' });
-    lastSaidAt = Date.now();
     UI().navigate('asset', {}, { replace: true });
+    say({ role: 'ai', text: '어떤 목표로 상담받고 싶으세요? 편하게 말씀해 주세요. 예: "2년 뒤 결혼 자금 모으고 싶어요"' });
   }
 
   async function setGoal(text) {
@@ -118,7 +120,7 @@
     a.goalText = t;
     a.purpose = ai.valid && ai.output.purpose ? ai.output.purpose : 'GOAL_SAVING';
     ai.output.actions.filter((x) => x.type === 'SET_INFO').forEach((x) => (a.stated[x.key] = x.value));
-    if (!(await sayAI(ai))) return;
+    if (ai.output.message && !(await sayAI(ai))) return;
     fsm().transition('GOAL_SET', { purpose: a.purpose });
     await advance();
   }
@@ -179,11 +181,15 @@
       WSP.events.add('ASSET', '지표 계산: ' + a.metrics.list.map((m) => m.key + '=' + (m.value == null ? '-' : m.value)).join(', '));
       f.transition(st === 'CALCULATING' ? 'CALCULATED' : 'RECALCULATED');
     } else if (st === 'INTERPRETING') {
-      think(true);
-      const ai = await AI.asset.interpret(a.metrics);
-      if (stale(ep)) return;
-      if (!(await sayAI(ai, { kind: 'interpret', figures: AA.interpretFigures(a.metrics, a.purpose) }))) return;
-      f.transition('INTERPRETED');
+      if (a.chat.some((m) => m.kind === 'interpret')) {
+        f.transition('INTERPRETED');
+      } else {
+        think(true);
+        const ai = await AI.asset.interpret(a.metrics);
+        if (stale(ep)) return;
+        if (!(await sayAI(ai, { kind: 'interpret', figures: AA.interpretFigures(a.metrics, a.purpose, a.info) }))) return;
+        f.transition('INTERPRETED');
+      }
     } else if (st === 'GAP_CHECK') {
       a.gaps = AA.findGaps(a.info, a.purpose, a.metrics);
       if (!a.gaps.length) return void f.transition('NO_GAP');

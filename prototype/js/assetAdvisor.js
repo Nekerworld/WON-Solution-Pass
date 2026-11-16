@@ -309,16 +309,16 @@
     const b = metrics.byKey;
     const figs = [];
     const add = (label, m, value, note, tone) => m.value != null && figs.push({ label: label, value: value, note: note || '', tone: tone || '' });
-    add('매달 남는 돈', b.surplus, '월 ' + b.surplus.text, '소득에서 생활비를 뺀 금액이에요');
+    add('매달 남는 돈', b.surplus, '월 ' + b.surplus.text, '');
     if (purposeId === 'EMERGENCY') {
-      add('바로 쓸 수 있는 예금', b.emergencyMonths, '생활비 ' + b.emergencyMonths.text + '치', '생활비 ' + SC.POLICY.emergencyMonths + '개월치가 기준이에요');
-      add('남겨 둘 비상자금', b.reserve, b.reserve.text, '생활비 ' + SC.POLICY.emergencyMonths + '개월치예요');
+      add('바로 쓸 수 있는 예금', b.emergencyMonths, '생활비 ' + b.emergencyMonths.text + '치', '');
+      add('남겨 둘 비상자금', b.reserve, b.reserve.text, '');
       return figs;
     }
-    add('무리 없이 모을 수 있는 돈', b.capacity, '월 ' + b.capacity.text, '남는 돈의 70% 정도예요');
+    add('무리 없이 모을 수 있는 돈', b.capacity, '월 ' + b.capacity.text, '');
     if (purposeId === 'INVEST') {
       const low = b.emergencyMonths.value != null && b.emergencyMonths.value < SC.POLICY.emergencyMonths;
-      add('바로 쓸 수 있는 예금', b.emergencyMonths, '생활비 ' + b.emergencyMonths.text + '치', '생활비 ' + SC.POLICY.emergencyMonths + '개월치가 기준이에요', low ? 'warning' : '');
+      add('바로 쓸 수 있는 예금', b.emergencyMonths, '생활비 ' + b.emergencyMonths.text + '치', '', low ? 'warning' : '');
       return figs;
     }
     const short = b.needMonthly.value != null && b.capacity.value != null ? b.needMonthly.value - b.capacity.value : null;
@@ -330,8 +330,8 @@
     if (basis.monthly == null) return [];
     const b = metrics.byKey;
     if (basis.purposeId === 'INVEST') {
-      const inv = [{ label: '매달 투자할 돈', value: '월 ' + man(basis.monthly), note: '무리 없이 모을 수 있는 돈의 절반이에요', tone: '' }];
-      if (b.reserve.value != null) inv.push({ label: '예금으로 남길 돈', value: b.reserve.text, note: '생활비 ' + SC.POLICY.emergencyMonths + '개월치예요', tone: '' });
+      const inv = [{ label: '매달 투자할 돈', value: '월 ' + man(basis.monthly), note: '', tone: '' }];
+      if (b.reserve.value != null) inv.push({ label: '예금으로 남길 돈', value: b.reserve.text, note: '', tone: '' });
       return inv;
     }
     const figs = [{ label: '매달 모을 돈', value: '월 ' + man(basis.monthly), note: '', tone: '' }];
