@@ -5,3 +5,19 @@
 # OS
 .DS_Store
 Thumbs.db
+
+
+*.jpg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.ico
+*.webp
+*.svg
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+dev.md

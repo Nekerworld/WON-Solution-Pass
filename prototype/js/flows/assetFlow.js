@@ -51,22 +51,33 @@
     if (a.chat.length > 80) a.chat.shift();
   }
 
-  // 글이 길수록 더 기다린 뒤 페이드로 보여 준다. 한 메시지는 5초를 넘기지 않는다.
+  // 화면에 나오는 말 사이는 5초. 자가 테스트는 지연 배율 0이라 기다리지 않는다.
   let pacing = 0;
+  // 인사 말이 나가기 전에 목표 칩이 눌리면 말이 순서가 뒤집힌다. 고객 동작은 한 줄로 잇는다.
+  let tail = Promise.resolve();
+  function enqueue(fn) {
+    const run = tail.then(fn, fn);
+    tail = run.then(
+      () => {},
+      () => {}
+    );
+    return run;
+  }
 
-  function loadMs(text) {
-    const len = String(text || '').replace(/\s/g, '').length;
-    return Math.min(5000, Math.max(800, len * 45)) * bank.getLatencyScale();
+  function loadMs() {
+    return 5000 * bank.getLatencyScale();
   }
 
   /** @returns {Promise<boolean>} 기다리는 동안 데모가 초기화됐으면 false */
   async function say(msg) {
     const ep = A().epoch();
-    const wait = loadMs(msg.text);
-    if (wait > 0) {
+    const wait = loadMs();
+    const thinkMs = wait * 0.6;
+    const easeMs = (wait - thinkMs) / 2;
+    if (thinkMs > 0) {
       pacing += 1;
       think(true);
-      await WSP.utils.sleep(wait);
+      await WSP.utils.sleep(thinkMs);
       pacing -= 1;
       if (stale(ep)) return false;
     }
@@ -74,6 +85,12 @@
     S().thinking = false;
     push(msg);
     A().refresh(SCREENS);
+    if (easeMs > 0) {
+      pacing += 1;
+      await WSP.utils.sleep(easeMs);
+      pacing -= 1;
+      if (stale(ep)) return false;
+    }
     return true;
   }
   const sayAI = (res, extra) => say(Object.assign({ role: 'ai', text: res.output.message, fallback: res.fallback }, extra || {}));
@@ -91,6 +108,31 @@
     return ep !== A().epoch() || !S();
   }
 
+  /** 상담에서 확인한 목표·참고 금액·계좌 정보를 가입 화면과 같은 객체에 둔다. */
+  function syncContext(extra) {
+    const a = S();
+    if (!a) return;
+    const known = [];
+    if (a.info && a.info.items) {
+      ['monthlyIncome', 'monthlyExpense', 'liquidAssets'].forEach((k) => {
+        const it = a.info.items[k];
+        if (!it || it.value == null || (it.source !== 'BANK' && it.source !== 'STATED')) return;
+        known.push({
+          label: AA.ITEMS[k].label,
+          text: AA.display(k, it.value),
+          source: it.source === 'BANK' ? '계좌' : '고객 답변',
+        });
+      });
+    }
+    const monthly = a.proposal && a.proposal.basis ? a.proposal.basis.monthly : a.handoffTerms ? a.handoffTerms.monthly : null;
+    const patch = {
+      goal: a.goalText || '',
+      knownFromAccount: known,
+    };
+    if (monthly != null) patch.financialSummary = { monthly: monthly, source: '계좌 정보 기준', adjustable: true };
+    A().publishContext(Object.assign(patch, extra || {}));
+  }
+
   /* ---------------- 시작 ---------------- */
   function start() {
     const f = fsm();
@@ -104,11 +146,18 @@
   function agree() {
     if (fsm().state !== 'CONSENT') return;
     fsm().transition('AGREE');
-    UI().navigate('asset', {}, { replace: true });
-    say({ role: 'ai', text: '어떤 목표로 상담받고 싶으세요? 편하게 말씀해 주세요. 예: "2년 뒤 결혼 자금 모으고 싶어요"' });
+    if (S()) S().thinking = true;
+    return enqueue(async () => {
+      await UI().navigate('asset', {}, { replace: true });
+      await say({ role: 'ai', text: '어떤 목표로 상담받고 싶으세요? 편하게 말씀해 주세요. 예: "2년 뒤 결혼 자금 모으고 싶어요"' });
+    });
   }
 
   async function setGoal(text) {
+    return enqueue(() => setGoalNow(text));
+  }
+
+  async function setGoalNow(text) {
     const a = S();
     const t = String(text || '').trim();
     if (!a || !t || fsm().state !== 'GOAL') return;
@@ -118,6 +167,7 @@
     const ai = await AI.asset.goal(t);
     if (stale(ep)) return;
     a.goalText = t;
+    syncContext();
     a.purpose = ai.valid && ai.output.purpose ? ai.output.purpose : 'GOAL_SAVING';
     ai.output.actions.filter((x) => x.type === 'SET_INFO').forEach((x) => (a.stated[x.key] = x.value));
     if (ai.output.message && !(await sayAI(ai))) return;
@@ -172,6 +222,7 @@
         return;
       }
       collect(r.data);
+      syncContext();
       f.transition('COLLECTED', { stateVersion: r.data.stateVersion });
     } else if (st === 'TAGGING') {
       WSP.events.add('ASSET', '출처 구분: ' + Object.keys(a.info.items).map((k) => k + ':' + a.info.items[k].source).join(', '));
@@ -225,6 +276,7 @@
       if (stale(ep)) return;
       if (!(await sayAI(ai, { kind: 'proposal', figures: AA.proposalFigures(basis, a.metrics) }))) return;
       a.proposal = { level: level, basis: basis, text: ai.output.message, at: Date.now() };
+      syncContext();
       f.transition('SHOWN', { level: level });
     }
   }
@@ -300,6 +352,10 @@
 
   /** 답변 칩: 범위 답변 */
   async function answerChip(value, label) {
+    return enqueue(() => answerChipNow(value, label));
+  }
+
+  async function answerChipNow(value, label) {
     const a = S();
     if (!a || fsm().state !== 'ASKING') return;
     const q = AA.QUESTIONS[a.pendingQuestion];
@@ -318,6 +374,10 @@
 
   /* ---------------- 검토 ---------------- */
   async function accept() {
+    return enqueue(() => acceptNow());
+  }
+
+  async function acceptNow() {
     const a = S();
     if (fsm().state !== 'REVIEW') return;
     sayUser('이 방향으로 할게요');
@@ -328,6 +388,7 @@
       months: a.proposal.basis.months,
       goalText: a.goalText,
     };
+    syncContext();
     fsm().transition('ACCEPT');
     await sayBot('좋아요. 다음에 할 일을 골라 주세요.');
   }
@@ -417,6 +478,14 @@
     if (!a || !a.info || !AA.ITEMS[key]) return;
     AA.setItem(a.info, key, value, 'STATED', '고객 정정');
     WSP.events.add('ASSET', '정보 정정 ' + key + ' → ' + value);
+    if (a.proposal && a.proposal.basis && (key === 'monthlyIncome' || key === 'monthlyExpense' || key === 'monthlySavingPref')) {
+      a.metrics = AA.computeMetrics(a.info);
+      const basis = AA.proposalBasis(a.info, a.purpose, a.metrics);
+      a.proposal.basis = basis;
+      a.handoffTerms = a.handoffTerms || {};
+      a.handoffTerms.monthly = basis.monthly;
+    }
+    syncContext();
     A().refresh(SCREENS);
   }
 
@@ -424,6 +493,7 @@
     const st = fsm().state;
     if (st !== 'EXPLORE' && st !== 'TO_JOIN') return;
     if (st === 'EXPLORE') fsm().transition('PRODUCT_SELECTED', { productId: productId });
+    syncContext({ selectedProductId: productId });
     UI().navigate('product', { productId: productId, from: 'asset' });
   }
 

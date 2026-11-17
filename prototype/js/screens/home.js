@@ -124,7 +124,13 @@
           '<p class="w-acct__hint">가입은 AI가 필요한 절차만 안내해요. 입출금 계좌도 그 안에서 함께 만들 수 있어요.</p></div>';
       }
       else {
-        accts = accountCard({ name: r.data.account.name, sub: '우리 ' + r.data.account.number, copy: true, balance: balanceHtml(hide, '0', ' 원'), transfer: true });
+        accts = accountCard({
+          name: r.data.account.name,
+          sub: '우리 ' + r.data.account.number,
+          copy: true,
+          balance: balanceHtml(hide, Number(r.data.account.balance || 0).toLocaleString('ko-KR'), ' 원'),
+          transfer: true,
+        });
         if (r.data.fxAccount) accts += accountCard({ name: r.data.fxAccount.name, sub: '우리 ' + r.data.fxAccount.number, copy: true, tag: '외화', balance: balanceHtml(hide, '0.00', ' USD'), transfer: true });
         r.data.savings.forEach((sv) => {
           const p = SC.getProduct(sv.productId);
@@ -207,9 +213,6 @@
         (hide ? ' is-on' : '') +
         '"><i></i></span></button></div></div>' +
         accts +
-        '<button class="w-ad" data-action="asset-start"><span class="w-ad__text"><strong>해외주식, 시작 금액 보기</strong></span><span class="w-ad__art">' +
-        sz(I.globe, 46) +
-        '</span></button>' +
         resume +
         '<button class="w-allacct" data-action="noop">전체계좌보기</button>' +
         '<h3 class="w-h3">추천서비스</h3><div class="w-hscroll">' +
@@ -471,6 +474,7 @@
       return (
         UI.appbar(header, { right: '<button class="icon-btn" data-action="noop" aria-label="관심 상품">' + I.heart + '</button>' }) +
         '<div class="screen-body w-pd">' +
+        (ctx ? UI.contextCard() : '') +
         '<h2 class="w-pd__title">' +
         title +
         '</h2><div class="w-pd__chips">' +
@@ -483,7 +487,7 @@
             esc(ctx.purpose) +
             (ctx.monthly ? ' · 월 ' + man(ctx.monthly) + (p.kind === 'BROKERAGE' ? ' 투자' : '') : '') +
             (ctx.months ? ' · ' + ctx.months + '개월' : '') +
-            '<br><span>상품을 고른 것은 가입이 아니에요. 아래 AI와 함께 가입을 누르면 가입 지원이 시작돼요.</span></p></div>'
+            '<br><span>상품을 고른 것은 가입이 아니에요. 아래 버튼으로 가입 지원이 시작돼요.</span></p></div>'
           : '') +
         '<div class="w-pd__box">' +
         box +
@@ -524,7 +528,7 @@
         '" data-from="' +
         (ctx ? 'asset' : '') +
         '">' +
-        (joinActive ? '이어서 가입' : 'AI와 함께 가입') +
+        (joinActive ? '이어서 가입' : ctx ? (p.kind === 'BROKERAGE' ? '이 계좌 개설 도와줘' : '이 상품 가입 도와줘') : 'AI와 함께 가입') +
         '</button></div>'
       );
     },

@@ -3,7 +3,7 @@
  * 시연용 모의 AI. 실제 AI API를 호출하지 않는다.
  * - 고객 문장 이해: 키워드 규칙
  * - 출력: aiSchema 구조화 출력 → 검증 → 실패 시 기본 선택지로 대체
- * - 로딩 연출: 400~1200ms 지연 (시연 패널 지연 배율 적용)
+ * - 말 사이 대기는 상담·가입 흐름에서 5초로 맞춘다. 여기서는 추가로 기다리지 않는다.
  * - 추적: 입력·출력·검증 결과를 시연 패널에 보여 준다.
  * AI는 질문·이해·설명·요약만 한다. 계산·판정·전이는 규칙 코드가 한다.
  */
@@ -30,8 +30,7 @@
   }
 
   function delay() {
-    const scale = WSP.mockBank ? WSP.mockBank.getLatencyScale() : 1;
-    return WSP.utils.sleep((400 + Math.random() * 800) * scale);
+    return Promise.resolve();
   }
 
   const FALLBACK = Object.freeze({
@@ -167,8 +166,12 @@
       const unmet = evaluation.conditions.filter((c) => c.status !== 'MET');
       const met = evaluation.conditions.filter((c) => c.status === 'MET');
       const needsIdentity = unmet.some((c) => c.fact === 'identityVerified');
+      const overseasLeft = unmet.some((c) => c.fact === 'fxRegistered' || c.fact === 'hasFxAccount' || c.fact === 'investorProfiled');
+      const accountReady = cust.facts.hasDepositAccount && cust.facts.identityVerified && cust.facts.certRegistered && cust.facts.kycDone;
       let message;
       if (!unmet.length) message = name + ' 고객님은 가입 조건을 모두 갖추셨어요. 가입 정보를 확인하고 승인만 하시면 돼요.';
+      else if (accountReady && overseasLeft)
+        message = '입출금 계좌, 실명확인, 인증서, 고객정보는 이미 있어요. 해외주식에 필요한 외환거래부터 할게요.';
       else if (!cust.facts.hasDepositAccount && needsIdentity) {
         message = name + ' 고객님은 우리 계좌가 없어서 실명확인부터예요.';
         if (acct) message += ' ' + acct.bank + ' 계좌는 이미 알고 있어서 다시 묻지 않을게요.';
@@ -222,8 +225,13 @@
     return run('해결 방법 안내', { steps: route.steps.map((s) => s.actionId), options: allowed }, { allowedActionIds: allowed }, () => {
       const order = route.steps.map((s, i) => i + 1 + '. ' + s.label).join('\n');
       const usable = route.options.filter((o) => o.availability !== 'BLOCKED' && o.reachable);
-      let message = route.steps[0].label;
-      if (usable.length > 1) message += '\n편한 방법을 골라 주세요.';
+      const cust = WSP.store.getState();
+      const accountReady = cust.facts.hasDepositAccount && cust.facts.identityVerified && cust.facts.certRegistered && cust.facts.kycDone;
+      const first = route.steps[0];
+      let message = first ? first.label : '';
+      if (accountReady && first && first.actionId === 'FX_REGISTER') {
+        message = '입출금 계좌, 실명확인, 인증서, 고객정보는 이미 있어요. 해외주식에 필요한 외환거래부터 할게요.';
+      } else if (usable.length > 1) message += '\n편한 방법을 골라 주세요.';
       return {
         intent: 'PRESENT_OPTIONS',
         message: message,
@@ -251,7 +259,7 @@
     return run('업무 후 재확인 설명', { result: kind, detail: detail || null }, {}, () => {
       const msg = {
         ALL_MET: '은행 기록으로 다시 확인했어요. 가입 조건을 모두 갖추셨어요. 이제 가입 정보를 확인하고 승인해 주세요.',
-        REMAINING: '은행 기록으로 다시 확인했어요. ' + (detail || '') + ' 남은 조건을 이어서 해결해요.',
+        REMAINING: detail || '은행 기록으로 다시 확인했어요. 남은 조건을 이어서 해결해요.',
         EXCEPTION: '업무 결과가 은행 기록과 맞지 않거나 아직 확인되지 않았어요. 원인을 확인할게요.',
       }[kind];
       return { intent: 'RECHECK_' + kind, message: msg, actions: [{ type: 'EXPLAIN', text: msg }] };
@@ -301,8 +309,9 @@
       const fin = WSP.store.getState().finance;
       const income = fin && fin.items && fin.items.monthlyIncome;
       let message;
-      if (b.surplus.value != null && income && income.value != null) {
-        message = '최근 급여 6개월 평균으로 소득은 월 ' + man(income.value) + ', 평균 지출을 빼면 매달 ' + b.surplus.text + '이 남아요.';
+      const expense = fin && fin.items && fin.items.monthlyExpense;
+      if (income && income.value != null && expense && expense.value != null) {
+        message = '이 계좌에서 월급 약 ' + man(income.value) + ', 지출 약 ' + man(expense.value) + '으로 알고 있어요. 다시 묻지 않을게요.';
       } else if (b.surplus.value != null) message = '매달 ' + b.surplus.text + '이 남아요.';
       else if (b.needMonthly.value != null)
         message = '목표를 채우려면 매달 ' + josa(b.needMonthly.text, '이') + ' 필요해요' + (metrics.feasible === false ? '. 지금 여유보다 많아서 조정이 필요해요' : '') + '.';
@@ -373,8 +382,9 @@
       if (basis.monthly == null) text = '지금 정보로는 월 적립액을 계산하기 어려워요.';
       else if (basis.purposeId === 'INVEST') {
         text =
-          (b.reserve.value != null ? josa(b.reserve.text, '은') + ' 예금으로 두고, ' : '') +
-          '매달 ' + man(basis.monthly) + '으로 시작하시는 걸 제안해요. 투자는 원금 손실이 날 수 있어요.';
+          '이 계좌에서 확인한 월급과 지출로 계산한 참고 금액은 매달 ' +
+          man(basis.monthly) +
+          '이에요. 목업 기준이라 고칠 수 있고, 감당할 수 있는 손실은 아직 확인하지 않았어요. 투자는 원금 손실이 날 수 있어요.';
       } else {
         text = '매달 ' + man(basis.monthly) + '씩' + (basis.months ? ' ' + AA().display('goalMonths', basis.months) + ' 동안' : '') + ' 모아 보시는 걸 제안해요.';
         if (b.expectedAmount.value != null) text += ' 기간이 끝나면 약 ' + josa(man(b.expectedAmount.value), '이') + ' 모여요.';

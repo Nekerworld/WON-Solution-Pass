@@ -180,7 +180,7 @@
   function chatLog(messages, thinking) {
     const list = messages || [];
     return (
-      list.map((m, i) => renderMessage(m, i === list.length - 1 && m.at && Date.now() - m.at < 800)).join('') +
+      list.map((m, i) => renderMessage(m, i === list.length - 1 && m.at && Date.now() - m.at < 1000)).join('') +
       (thinking ? '<div class="thinking" aria-label="AI가 생각하는 중"><span class="msg__avatar">' + BOT_FACE + '</span><span class="thinking__dots"><i></i><i></i><i></i></span>AI가 확인하고 있어요</div>' : '')
     );
   }
@@ -261,18 +261,67 @@
     );
   }
 
-  /** 가장 최근 메시지의 첫 줄이 화면 위로 밀려나지 않는 만큼만 아래로 내린다 */
+  /** 새 메시지의 첫 줄만 대화 영역 위에 맞춘다. 바닥으로 내리지 않고, 이전 말을 읽는 중이면 그대로 둔다. */
   function scrollToLatest(body) {
     if (!body) return;
-    const bottom = body.scrollHeight - body.clientHeight;
-    const msgs = body.querySelectorAll('.chat-log > .msg, .chat-log > .msg-sys');
-    const last = msgs[msgs.length - 1];
-    if (!last) {
-      body.scrollTop = bottom;
-      return;
+    if (!body.dataset.scrollBound) {
+      body.dataset.scrollBound = '1';
+      body.addEventListener(
+        'scroll',
+        () => {
+          if (body.dataset.locking === '1') return;
+          const msgs = body.querySelectorAll('.chat-log > .msg, .chat-log > .msg-sys');
+          const last = msgs[msgs.length - 1];
+          if (!last) return;
+          const lastTop = last.getBoundingClientRect().top - body.getBoundingClientRect().top;
+          if (lastTop > 48) body.dataset.userScrolled = '1';
+          else body.dataset.userScrolled = '';
+        },
+        { passive: true }
+      );
     }
-    const top = last.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 12;
-    body.scrollTop = Math.max(0, Math.min(bottom, top));
+    if (body.dataset.userScrolled === '1') return;
+    const pin = () => {
+      const nodes = body.querySelectorAll('.chat-log > .msg, .chat-log > .msg-sys');
+      const lastMsg = nodes[nodes.length - 1];
+      if (!lastMsg) return;
+      const top = lastMsg.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 12;
+      body.dataset.locking = '1';
+      body.scrollTop = Math.max(0, top);
+    };
+    pin();
+    requestAnimationFrame(() => {
+      if (body.dataset.userScrolled === '1') {
+        body.dataset.locking = '';
+        return;
+      }
+      pin();
+      requestAnimationFrame(() => {
+        body.dataset.locking = '';
+      });
+    });
+  }
+
+  /** 상담·가입이 공유하는 상황 카드. 확인된 항목만 보여 준다. */
+  function contextCard() {
+    const c = WSP.app && WSP.app.session ? WSP.app.session.customerContext : null;
+    if (!c || (!c.goal && !(c.financialSummary && c.financialSummary.monthly != null) && !(c.knownFromAccount && c.knownFromAccount.length))) return '';
+    const money =
+      c.financialSummary && c.financialSummary.monthly != null
+        ? '<em>투자 참고 금액 월 ' + WSP.utils.formatMan(c.financialSummary.monthly) + ' · 계좌 정보 기준 · 수정 가능</em>'
+        : '';
+    const shown = (label) => (label === '월 소득(세후)' ? '월급' : label === '월 지출' ? '지출' : label);
+    const items = (c.knownFromAccount || [])
+      .map((x) => '<li>' + esc(shown(x.label)) + ' ' + esc(x.text) + ' <i>' + esc(x.source) + '</i></li>')
+      .join('');
+    return (
+      '<details class="ctx-live" open><summary><span>목표</span>' +
+      (c.goal ? '<b>' + esc(c.goal) + '</b>' : '') +
+      money +
+      '</summary>' +
+      (items ? '<ul>' + items + '</ul>' : '<p>확인된 계좌 정보가 여기에 모여요.</p>') +
+      '</details>'
+    );
   }
 
   function chatInput(id, action, placeholder, disabled) {
@@ -777,6 +826,7 @@
     chatIntro: chatIntro,
     bottomNav: bottomNav,
     scrollToLatest: scrollToLatest,
+    contextCard: contextCard,
     chatInput: chatInput,
     registerScreen: registerScreen,
     init: init,

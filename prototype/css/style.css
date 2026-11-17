@@ -475,6 +475,44 @@ button {
   }
 }
 
+/* 발표 모드: 390:844 폰을 칸에 맞게 통째로 키운다. 프레임과 내용이 같은 비율이다. */
+html.is-present .stage {
+  grid-template-columns: minmax(0, 62%) minmax(280px, 38%);
+}
+
+html.is-present .stage-main {
+  container-type: size;
+}
+
+html.is-present .phone {
+  width: 390px;
+  height: 844px;
+  max-height: none;
+  aspect-ratio: 390 / 844;
+  zoom: min(calc(100cqh / 844px), calc(100cqw / 390px));
+}
+
+html.is-present .w-strip__bar,
+html.is-present .w-allacct,
+html.is-present .w-svc__item[data-action="noop"],
+html.is-present .w-home > .w-h3:nth-of-type(2),
+html.is-present .w-group,
+html.is-present .chat-tools button[data-action="noop"],
+html.is-present .quick {
+  display: none;
+}
+
+html.is-present .present-hint {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #e8f3ff;
+  color: var(--won-blue-deep);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -256,17 +256,23 @@
     await F.setGoal('해외주식 투자를 처음 시작해 보고 싶어요');
     const a = WSP.app.session.asset;
     assert(a.purpose === 'INVEST', '목적 ' + a.purpose);
+    const asked = [];
     let n = 0;
     while (af().state === 'ASKING' && n < 4) {
+      asked.push(a.pendingQuestion);
       const q = AA.QUESTIONS[a.pendingQuestion];
       await F.answerChip(String(q.options[0][1]), q.options[0][0]);
       n += 1;
     }
+    assert(asked.indexOf('monthlyIncome') === -1 && asked.indexOf('monthlyExpense') === -1, '월급·지출을 다시 물음 ' + asked.join(','));
     assert(af().state === 'REVIEW' && a.proposal.level === 'FULL', '상태 ' + af().state + ' / ' + (a.proposal && a.proposal.level));
     assert(a.proposal.basis.monthly === 490000, '월 투자 금액 ' + a.proposal.basis.monthly);
     const prop = a.chat.filter((m) => m.kind === 'proposal').pop();
     assert(prop && /원금 손실/.test(prop.text), '투자 위험 안내 없음');
     await F.accept();
+    const shared = WSP.app.session.customerContext;
+    assert(shared && shared.goal === '해외주식 투자를 처음 시작해 보고 싶어요', '목표 전달 ' + (shared && shared.goal));
+    assert(shared.financialSummary && shared.financialSummary.monthly === 490000, '참고 금액 ' + (shared.financialSummary && shared.financialSummary.monthly));
     F.nextAction('explore');
     assert(af().state === 'EXPLORE', '상태 ' + af().state);
     const ids = SC.PRODUCTS.map((p) => p.id);
@@ -292,6 +298,20 @@
     assert(jf().state === 'COMPLETED', '결과 ' + jf().state);
     const s = store.getState();
     assert(SC.DEMO.stages.every((st) => st.facts.every((k) => s.facts[k] === true)), '진행 단계 사실 미충족');
+  });
+
+  t('시연용 요약 진행: 외환거래 이후 재조회로 이어지고 승인 전에 멈춤', async () => {
+    fresh();
+    await startJoin({}, SC.DEMO.productId);
+    const first = WSP.app.session.join.route.steps[0].actionId;
+    assert(first === 'FX_REGISTER', '첫 업무 ' + first);
+    await doTask(first, true);
+    assert(store.getState().facts.fxRegistered === true, '외환거래 미반영');
+    assert(jf().state !== 'READY_TO_APPLY', '승인 전에 요약 없이 준비됨');
+    await J().summarizeRemaining();
+    assert(jf().state === 'READY_TO_APPLY', '요약 후 ' + jf().state);
+    assert(store.getState().facts.hasFxAccount === true && store.getState().facts.investorProfiled === true, '요약 업무 미반영');
+    assert(Object.keys(store.getState().applications).length === 0, '승인 전에 가입 요청됨');
   });
 
   t('가입 결과 조회는 요청을 다시 보내지 않고, 같은 requestId는 중복 가입을 만들지 않음', async () => {
@@ -349,7 +369,7 @@
     const m2 = AA.computeMetrics(info);
     assert(m1.byKey.surplus.value === 1400000 && m2.byKey.surplus.value === 2000000, '여유자금 ' + m1.byKey.surplus.value + '→' + m2.byKey.surplus.value);
     const h = info.history.find((x) => x.key === 'monthlyExpense');
-    assert(h && h.correction && h.fromSource === 'ESTIMATED' && h.toSource === 'STATED', '정정 이력 없음');
+    assert(h && h.correction && h.fromSource === 'BANK' && h.toSource === 'STATED', '정정 이력 없음');
     assert(AA.computeMetrics(info).byKey.needMonthly.value === m2.byKey.needMonthly.value, '같은 입력에 다른 결과');
   });
 

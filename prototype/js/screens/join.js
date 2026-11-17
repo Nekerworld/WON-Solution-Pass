@@ -42,7 +42,7 @@
         '이 동의로 하지 않는 것</h3><ul class="consent-list consent-list--no">' +
         '<li>상품 가입 신청 — 마지막에 고객님 승인을 따로 받아요</li>' +
         '<li>가입 조건을 바꾸거나 새로 만드는 것 — 조건은 은행 기준을 그대로 써요</li></ul></div>' +
-        '</div><div class="screen-footer"><div class="btn-row"><button class="btn btn--ghost" data-action="join-exit">다음에 할게요</button><button class="btn btn--primary" data-action="join-agree">동의하고 시작</button></div></div>'
+        '</div><div class="screen-footer"><div class="btn-row"><button class="btn btn--ghost" data-action="join-exit">다음에 할게요</button><button class="btn btn--primary" data-action="join-agree">가입 조건 확인</button></div></div>'
       );
     },
   });
@@ -93,16 +93,26 @@
     );
   }
 
+  function freshReply(chat) {
+    const last = chat && chat[chat.length - 1];
+    return !!(last && last.role === 'ai' && last.at && Date.now() - last.at < 1000);
+  }
+
   function optionCards(j) {
     const shown = j.options.filter((o) => o.shown);
     const blocked = j.options.filter((o) => !o.shown);
+    const rise = freshReply(j.chat) ? ' is-in' : '';
     return (
-      '<div class="opt-list">' +
+      '<div class="opt-list' +
+      rise +
+      '">' +
       shown
-        .map((o) => {
+        .map((o, i) => {
           const t = SC.getTask(o.actionId);
           return (
-            '<button class="opt" data-action="join-option" data-task="' +
+            '<button class="opt" style="--i:' +
+            i +
+            '" data-action="join-option" data-task="' +
             o.actionId +
             '"><span class="opt__icon">' +
             (UI.TASK_ICON[t.icon] || I.doc) +
@@ -126,10 +136,20 @@
         })
         .join('') +
       blocked
-        .map((o) => {
+        .map((o, i) => {
           const t = SC.getTask(o.actionId);
           const why = o.blockedNeeds.length ? esc(o.blockedNeeds.map((k) => SC.CONSTRAINTS[k].label).join(', ')) + ' 없음' : '이후 단계로 이어지지 않음';
-          return '<div class="opt is-off"><span class="opt__icon">' + (UI.TASK_ICON[t.icon] || I.doc) + '</span><span class="opt__text"><strong>' + esc(t.label) + '</strong><span>이용 불가: ' + why + '</span></span></div>';
+          return (
+            '<div class="opt is-off" style="--i:' +
+            (shown.length + i) +
+            '"><span class="opt__icon">' +
+            (UI.TASK_ICON[t.icon] || I.doc) +
+            '</span><span class="opt__text"><strong>' +
+            esc(t.label) +
+            '</strong><span>이용 불가: ' +
+            why +
+            '</span></span></div>'
+          );
         })
         .join('') +
       '</div>'
@@ -141,11 +161,14 @@
     if (j.thinking) return '';
     const q = j.pendingKey;
     if (q && (st === 'CLARIFYING' || st === 'REMAINING')) {
+      const rise = freshReply(j.chat) ? ' is-in' : '';
       return (
-        '<div class="act"><div class="chip-row">' +
-        '<button class="chip chip--lg" data-action="join-answer" data-key="' +
+        '<div class="act"><div class="chip-row' +
+        rise +
+        '">' +
+        '<button class="chip chip--lg" style="--i:0" data-action="join-answer" data-key="' +
         q +
-        '" data-value="true">네, 있어요</button><button class="chip chip--lg" data-action="join-answer" data-key="' +
+        '" data-value="true">네, 있어요</button><button class="chip chip--lg" style="--i:1" data-action="join-answer" data-key="' +
         q +
         '" data-value="false">아니요, 없어요</button></div></div>'
       );
@@ -204,14 +227,22 @@
           ['상담 연결해 주세요', '완료했다고 떴는데 다시 하래요', '그만할래요'].map((q) => '<button class="quick__chip" data-action="join-send" data-q="' + esc(q) + '">' + esc(q) + '</button>').join('') +
           '</div>'
         : '';
+      const presentHint =
+        document.documentElement.classList.contains('is-present') &&
+        WSP.store.getState().facts.fxRegistered &&
+        (st === 'OPTIONS_READY' || st === 'REMAINING')
+          ? '<p class="present-hint">다음은 오른쪽 남은 절차 확인입니다.</p>'
+          : '';
       return (
         UI.chatHeader(jf().can('EXIT') ? { action: 'join-exit', label: '그만하기' } : null) +
         '<div class="screen-body join-body chat-body" id="join-body">' +
         UI.chatIntro('AI 가입 지원', j.chat[0] && j.chat[0].at) +
+        UI.contextCard() +
         checklist(j) +
         '<div class="chat-log">' +
         UI.chatLog(j.chat, j.thinking) +
         '</div>' +
+        presentHint +
         actionPanel(j) +
         '</div>' +
         chips +
@@ -342,8 +373,8 @@
       return {
         icon: I.check,
         tone: 'success',
-        title: '가입이 완료됐어요',
-        desc: '은행 처리 결과로 확인했어요.',
+        title: p.kind === 'BROKERAGE' ? '해외주식 계좌 개설이 확인됐어요' : '가입이 완료됐어요',
+        desc: p.kind === 'BROKERAGE' ? '은행 조회에서 계좌 개설이 확인됐어요. 실제 투자나 자동이체는 실행하지 않았어요.' : '은행 처리 결과로 확인했어요.',
         rows: rows,
         foot: '<button class="btn btn--primary btn--block" data-action="' + newAction + '">홈으로</button>',
       };

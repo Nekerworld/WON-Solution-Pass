@@ -38,7 +38,7 @@
         '<div class="card card--outline"><h3 class="card__title">' +
         I.lock +
         '이 상담에서 하지 않는 것</h3><ul class="consent-list consent-list--no"><li>상품 가입·이체·해지</li><li>방향 선택을 가입으로 처리하는 것 — 가입은 상품을 고른 뒤 따로 해요</li></ul></div>' +
-        '</div><div class="screen-footer"><div class="btn-row"><button class="btn btn--ghost" data-action="asset-decline">다음에 할게요</button><button class="btn btn--primary" data-action="asset-agree">동의하고 시작</button></div></div>'
+        '</div><div class="screen-footer"><div class="btn-row"><button class="btn btn--ghost" data-action="asset-decline">다음에 할게요</button><button class="btn btn--primary" data-action="asset-agree">상담 시작</button></div></div>'
       );
     },
   });
@@ -77,21 +77,49 @@
 
   const GOAL_CHIPS = ['해외주식 투자를 처음 시작해 보고 싶어요', '결혼 자금 3천만원을 3년 안에 모으고 싶어요', '비상자금이 충분한지 알고 싶어요'];
 
+  function freshReply(chat) {
+    const last = chat && chat[chat.length - 1];
+    return !!(last && last.role === 'ai' && last.at && Date.now() - last.at < 1000);
+  }
+
+  function chipButton(label, attrs, i, extra) {
+    return '<button class="chip' + (extra || '') + '" style="--i:' + i + '" ' + attrs + '>' + esc(label) + '</button>';
+  }
+
   function actionPanel(a) {
     const st = af().state;
     if (a.thinking) return '';
-    if (st === 'GOAL') return '<div class="act"><div class="chip-row">' + GOAL_CHIPS.map((q) => '<button class="chip chip--lg" data-action="asset-send" data-q="' + esc(q) + '">' + esc(q) + '</button>').join('') + '</div></div>';
+    const rise = freshReply(a.chat) ? ' is-in' : '';
+    if (st === 'GOAL')
+      return (
+        '<div class="act"><div class="chip-row' +
+        rise +
+        '">' +
+        GOAL_CHIPS.map((q, i) => chipButton(q, 'data-action="asset-send" data-q="' + esc(q) + '"', i, ' chip--lg')).join('') +
+        '</div></div>'
+      );
     if (st === 'ASKING') {
       const q = AA.QUESTIONS[a.pendingQuestion];
       if (!q) return '';
+      const sub = [
+        ['UNKNOWN', '잘 모르겠어요', ''],
+        ['REFUSED', '답하고 싶지 않아요', ''],
+        ['STOP', '지금 정보로 알려주세요', ' chip--accent'],
+      ];
       return (
         '<div class="act"><span class="act__meta">질문 ' +
         a.questionsAsked +
         '/' +
         SC.POLICY.assetQuestionLimit +
-        '</span><div class="chip-row">' +
-        q.options.map((o) => '<button class="chip chip--lg" data-action="asset-chip" data-value="' + o[1] + '" data-label="' + esc(o[0]) + '">' + esc(o[0]) + '</button>').join('') +
-        '</div><div class="chip-row chip-row--sub"><button class="chip" data-action="asset-chip" data-value="UNKNOWN" data-label="잘 모르겠어요">잘 모르겠어요</button><button class="chip" data-action="asset-chip" data-value="REFUSED" data-label="답하고 싶지 않아요">답하고 싶지 않아요</button><button class="chip chip--accent" data-action="asset-chip" data-value="STOP" data-label="지금 정보로 알려주세요">지금 정보로 알려주세요</button></div></div>'
+        '</span><div class="chip-row' +
+        rise +
+        '">' +
+        q.options.map((o, i) => chipButton(o[0], 'data-action="asset-chip" data-value="' + o[1] + '" data-label="' + esc(o[0]) + '"', i, ' chip--lg')).join('') +
+        '</div><div class="chip-row chip-row--sub' +
+        rise +
+        '">' +
+        sub.map((s, i) => chipButton(s[1], 'data-action="asset-chip" data-value="' + s[0] + '" data-label="' + esc(s[1]) + '"', q.options.length + i, s[2])).join('') +
+        '</div></div>'
       );
     }
     if (st === 'REVIEW')
@@ -152,6 +180,7 @@
         UI.chatHeader(af().can('END') || af().can('EXIT') ? { action: 'asset-end', label: '분석 종료' } : null) +
         '<div class="screen-body asset-body chat-body" id="asset-body">' +
         UI.chatIntro('AI 자산관리 상담', a.chat[0] && a.chat[0].at) +
+        UI.contextCard() +
         '<div class="chat-log">' +
         UI.chatLog(a.chat, a.thinking) +
         '</div>' +
@@ -177,6 +206,7 @@
       return (
         UI.appbar('상품 둘러보기') +
         '<div class="screen-body">' +
+        UI.contextCard() +
         '<div class="ctx-card"><span>' +
         I.target +
         '상담에서 정한 방향</span><strong>' +
@@ -187,8 +217,11 @@
         (t.goalText ? '<small>"' + esc(t.goalText) + '"</small>' : '') +
         '</div>' +
         SC.PRODUCTS.map((p) => {
+            const pick = p.id === SC.DEMO.productId;
             return (
-              '<div class="product-card is-static"><div class="product-card__top">' +
+              '<div class="product-card is-static' +
+              (pick ? ' is-pick' : '') +
+              '"><div class="product-card__top">' +
               UI.badge(p.type, 'info') +
               '<span class="product-card__rate">' +
               esc(p.rate) +
@@ -196,9 +229,13 @@
               esc(p.name) +
               '</strong><span>' +
               esc(p.summary) +
-              '</span><button class="btn btn--secondary btn--sm" data-action="asset-select-product" data-product="' +
+              '</span><button class="btn ' +
+              (pick ? 'btn--primary' : 'btn--ghost btn--sm') +
+              '" data-action="asset-select-product" data-product="' +
               p.id +
-              '">이 상품 보기</button></div>'
+              '">' +
+              (pick ? '이 계좌 보기' : '다른 상품') +
+              '</button></div>'
             );
           })
           .join('') +

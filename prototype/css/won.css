@@ -1622,10 +1622,10 @@
   white-space: pre-line;
 }
 
-@keyframes msg-rise {
+@keyframes msg-from-left {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateX(-80%);
   }
   to {
     opacity: 1;
@@ -1633,9 +1633,54 @@
   }
 }
 
-.chat-body .msg.is-in,
-.chat-body .msg-sys.is-in {
-  animation: msg-rise 0.4s ease;
+@keyframes msg-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(80%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes chip-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes time-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.chat-body .msg--bot.is-in {
+  animation: msg-from-left 1s ease both;
+}
+
+.chat-body .msg--user.is-in {
+  animation: msg-from-right 1s ease both;
+}
+
+.chat-body .msg--bot.is-in .msg__time {
+  animation: time-in 0.35s ease both;
+  animation-delay: 1.6s;
+}
+
+.chip-row.is-in .chip,
+.opt-list.is-in .opt {
+  animation: chip-rise 0.45s ease both;
+  animation-delay: calc(1s + var(--i, 0) * 0.12s);
 }
 
 .chat-body .msg-sys {

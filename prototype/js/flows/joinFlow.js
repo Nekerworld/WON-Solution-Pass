@@ -65,24 +65,27 @@
     if (j.chat.length > 80) j.chat.shift();
   }
 
-  function loadMs(text) {
-    const len = String(text || '').replace(/\s/g, '').length;
-    return Math.min(5000, Math.max(800, len * 45)) * bank.getLatencyScale();
+  function loadMs() {
+    return 5000 * bank.getLatencyScale();
   }
 
   async function sayAI(res, extra) {
     const ep = A().epoch();
     const text = res.output.message;
-    const wait = loadMs(text);
-    if (wait > 0) {
+    const wait = loadMs();
+    const thinkMs = wait * 0.6;
+    const easeMs = (wait - thinkMs) / 2;
+    if (thinkMs > 0) {
       think(true);
-      await WSP.utils.sleep(wait);
+      await WSP.utils.sleep(thinkMs);
       if (stale(ep)) return false;
     }
     if (!S()) return false;
     S().thinking = false;
     push(Object.assign({ role: 'ai', text: text, fallback: res.fallback, errors: res.errors }, extra || {}));
     A().refresh(SCREENS);
+    if (easeMs > 0) await WSP.utils.sleep(easeMs);
+    if (stale(ep)) return false;
     return true;
   }
 
@@ -122,6 +125,12 @@
     const f = fsm();
     if (f.state !== 'IDLE') return false;
     WSP.app.session.join = fresh(productId, ctx);
+    const patch = { selectedProductId: productId };
+    if (ctx) {
+      patch.goal = ctx.goalText || (WSP.app.session.customerContext && WSP.app.session.customerContext.goal) || '';
+      if (ctx.monthly != null) patch.financialSummary = { monthly: ctx.monthly, source: '계좌 정보 기준', adjustable: true };
+    }
+    WSP.app.publishContext(patch);
     f.transition('START', { productId: productId });
     return true;
   }
@@ -130,8 +139,10 @@
     if (fsm().state !== 'CONSENT') return;
     fsm().transition('AGREE');
     S().metrics.screens += 1;
-    UI().navigate('join', {}, { replace: true });
-    await advance();
+    S().thinking = true;
+    const nav = UI().navigate('join', {}, { replace: true });
+    const run = advance();
+    await Promise.all([nav, run]);
   }
 
   function doneTaskLabels() {
@@ -516,12 +527,14 @@
       fsm().transition('ALL_MET');
       return;
     }
-    let detail = '';
-    if (status === 'CANCELLED') detail = '업무를 마치지 않고 닫으셨어요.';
-    else if (status === 'PARTIAL') detail = '일부 단계만 저장돼서 아직 완료되지 않았어요.';
     const remain = ev.conditions.filter((x) => x.status !== 'MET').map((x) => x.label);
-    if (detail) {
-      const ai = await AI.join.afterRecheck('REMAINING', detail + ' 남은 조건은 ' + WSP.utils.josa(remain.join(', '), '이에요') + '.');
+    const doneName = ct ? SC.getTask(ct.taskId).label : '';
+    let sentence = '';
+    if (status === 'CANCELLED') sentence = '업무를 마치지 않고 닫으셨어요. 남은 조건은 ' + WSP.utils.josa(remain.join(', '), '이에요') + '.';
+    else if (status === 'PARTIAL') sentence = '일부 단계만 저장돼서 아직 완료되지 않았어요. 남은 조건은 ' + WSP.utils.josa(remain.join(', '), '이에요') + '.';
+    else if (doneName) sentence = '은행 조회에서 ' + WSP.utils.josa(doneName, '이') + ' 끝났어요.' + (remain[0] ? ' 다음은 ' + WSP.utils.josa(remain[0], '이에요') + '.' : '');
+    if (sentence) {
+      const ai = await AI.join.afterRecheck('REMAINING', sentence);
       if (stale(ep)) return;
       think(false);
       await sayAI(ai);
@@ -713,6 +726,36 @@
     if (AUTO.indexOf(fsm().state) !== -1 && !running) advance();
   }
 
+  /**
+   * 시연용 요약 진행. 외환거래가 은행 사실로 반영된 뒤에만
+   * 남은 업무를 기존 처리·재조회로 넘기고, 승인 화면에서 멈춘다.
+   */
+  async function summarizeRemaining() {
+    const ep = A().epoch();
+    for (let i = 0; i < 6; i++) {
+      if (stale(ep)) return;
+      const st = fsm().state;
+      if (st === 'READY_TO_APPLY' || st === 'COMPLETED') return;
+      if (st !== 'OPTIONS_READY' && st !== 'REMAINING') return;
+      if (WSP.store.getState().facts.fxRegistered !== true) return;
+      const j = S();
+      const step = j && j.route && j.route.steps && j.route.steps[0];
+      if (!step) return;
+      const task = SC.getTask(step.actionId);
+      const opened = bank.openTask(step.actionId, { mode: 'modal' });
+      if (!opened.ok) return;
+      j.currentTask = { taskId: step.actionId, sessionId: opened.data.sessionId, facts: Object.keys(task.effects) };
+      j.metrics.tasks += 1;
+      j.pendingKey = null;
+      fsm().transition('TASK_OPENED', { taskId: step.actionId, sessionId: opened.data.sessionId });
+      const ran = await bank.runTask(opened.data.sessionId, {});
+      if (stale(ep)) return;
+      const status = ran.ok ? ran.data.status : 'REJECTED';
+      await modalClosed({ status: status, sessionId: opened.data.sessionId });
+      if (status !== 'COMPLETED') return;
+    }
+  }
+
   /** 상담 인계 요약 재료 */
   function handoffContext() {
     const j = S();
@@ -749,6 +792,7 @@
     queryResult: queryResult,
     escalateFailed: escalateFailed,
     handoffContext: handoffContext,
+    summarizeRemaining: summarizeRemaining,
     isRunning: () => running,
   };
 

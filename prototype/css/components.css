@@ -2241,37 +2241,9 @@
   min-width: 0;
 }
 
-/* 패널이 충분히 넓으면 조작(왼쪽) / 관찰(오른쪽) 2단 구성, 각 단 독립 스크롤 */
 @media (min-width: 1400px) {
   .stage > .demo-panel {
     font-size: 16px;
-  }
-  .dp-body {
-    display: grid;
-    grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
-    gap: 24px;
-    overflow: hidden;
-    padding: 0 0 0 20px;
-  }
-  .dp-col {
-    overflow-y: auto;
-    min-height: 0;
-    padding: 4px 0 16px;
-    scrollbar-width: thin;
-    scrollbar-color: #2b3646 transparent;
-  }
-  .dp-col--observe {
-    padding-right: 20px;
-    border-left: 1px solid var(--line);
-    padding-left: 24px;
-    margin-left: -12px;
-  }
-  .dp-col--controls .dp-tests {
-    max-height: none;
-  }
-  .dp-col--observe .dp-log,
-  .dp-col--observe .dp-pre {
-    max-height: 260px;
   }
 }
 
@@ -3224,6 +3196,15 @@
   border-radius: 16px;
   padding: 16px;
   margin-bottom: 10px;
+}
+
+.product-card.is-pick {
+  border-color: var(--won-blue);
+  box-shadow: 0 8px 24px rgba(36, 136, 243, 0.16);
+}
+
+.product-card.is-pick strong {
+  font-size: 18px;
 }
 
 .product-card.is-static {
@@ -4701,6 +4682,75 @@ button.opt:hover {
   line-height: 1.55;
 }
 
+.ctx-live {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #f4f7fb;
+  border: 1px solid #e1e8f0;
+}
+
+.ctx-live summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ctx-live summary::-webkit-details-marker {
+  display: none;
+}
+
+.ctx-live summary span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+
+.ctx-live summary b {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.ctx-live summary em {
+  font-style: normal;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.ctx-live ul {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ctx-live li {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.ctx-live li i {
+  font-style: normal;
+  margin-left: 4px;
+  color: var(--won-blue);
+}
+
+.dp-fold {
+  padding: 0;
+}
+
+.dp-fold > summary {
+  padding: 14px 16px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.dp-btn[disabled] {
+  opacity: 0.45;
+}
+
 .ctx-card {
   display: flex;
   flex-direction: column;
@@ -4917,6 +4967,16 @@ button.opt:hover {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+
+.demo-panel .dp-nums--lines {
+  grid-template-columns: 1fr;
+}
+
+.demo-panel .dp-nums--lines .dp-num strong {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .demo-panel .dp-num {

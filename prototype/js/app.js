@@ -11,7 +11,7 @@
 
   const WSP = window.WSP;
   const storage = WSP.utils.safeStorage();
-  const SESSION_KEY = 'wsp.session.v4';
+  const SESSION_KEY = 'wsp.session.v6';
 
   const fsms = {
     join: WSP.createFSM('join'),
@@ -22,6 +22,8 @@
   function freshSession() {
     return {
       ui: { hideBalance: false, disclaimerClosed: false },
+      /** 상담과 가입이 함께 읽는 고객 상황. 완료 여부는 넣지 않는다. */
+      customerContext: null,
       join: null,
       direct: null,
       asset: null,
@@ -119,6 +121,18 @@
     if (!screenIds || screenIds.indexOf(cur.id) !== -1) WSP.ui.rerender();
   }
 
+  function publishContext(patch) {
+    const base = session.customerContext || {
+      goal: '',
+      selectedProductId: null,
+      financialSummary: null,
+      knownFromAccount: [],
+      updatedAt: 0,
+    };
+    session.customerContext = Object.assign({}, base, patch || {}, { updatedAt: Date.now() });
+    save();
+  }
+
   function resetDemo() {
     epoch += 1;
     WSP.ui.closeAllOverlays();
@@ -196,6 +210,7 @@
     onInput: onInput,
     onCommit: onCommit,
     refresh: refresh,
+    publishContext: publishContext,
     resetDemo: resetDemo,
     onChange: (fn) => {
       changeListeners.add(fn);

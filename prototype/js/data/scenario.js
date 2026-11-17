@@ -360,12 +360,12 @@
       notLinked: ['증권사', '보험사', '부동산·현금'],
       otherBankAccounts: [{ bank: '가상 A은행', name: '입출금 통장', masked: '110-***-4421' }],
       items: {
-        monthlyIncome: { value: 3500000, source: 'ESTIMATED', basis: '가상 A은행 급여성 입금 최근 6개월 평균' },
-        monthlyExpense: { value: 2100000, source: 'ESTIMATED', basis: '가상 A은행·B카드 출금 최근 6개월 평균' },
-        liquidAssets: { value: 8000000, source: 'BANK', basis: '가상 A은행 예금·적금 잔액' },
+        monthlyIncome: { value: 3500000, source: 'BANK', basis: '보유 입출금 계좌의 급여 내역' },
+        monthlyExpense: { value: 2100000, source: 'BANK', basis: '보유 입출금 계좌의 지출 내역' },
+        liquidAssets: { value: 8482400, source: 'BANK', basis: '보유 입출금 계좌의 예금 잔액' },
         investAssets: { value: null, source: 'UNKNOWN', basis: '연결되지 않은 증권사' },
-        debt: { value: 0, source: 'BANK', basis: '연결 기관 대출 없음 (연결 안 된 기관은 미확인)' },
-        debtPayment: { value: 0, source: 'BANK', basis: '연결 기관 상환 내역 없음' },
+        debt: { value: 0, source: 'BANK', basis: '보유 계좌 기준 대출 없음' },
+        debtPayment: { value: 0, source: 'BANK', basis: '보유 계좌 기준 상환 내역 없음' },
       },
     },
     simulation: {
@@ -380,12 +380,12 @@
     system: { bankAvailable: true, stateVersion: 1 },
   });
 
-  /** 발표용 통합 시나리오: 계좌가 있는 고객의 해외주식 계좌 개설 */
+  /** 발표용 통합 시나리오: 입출금 계좌는 있고 해외주식 계좌는 없는 김우리 */
   const DEMO = Object.freeze({
-    title: '계좌가 있는 고객의 해외주식 계좌 개설',
+    title: '입출금 계좌는 있고 해외주식 계좌는 없는 김우리',
     productId: 'OVERSEAS_STOCK',
     customerAnswers: [],
-    givens: ['우리은행 계좌·인증서·고객정보 있음', '외환거래·외화 계좌·투자성향 없음'],
+    givens: ['입출금 계좌·실명확인·인증서·고객정보 있음', '월급·지출·예금은 이 계좌에서 확인', '해외주식 계좌 없음'],
     stages: [
       { id: 'FX', label: '외환거래', facts: ['fxRegistered'] },
       { id: 'FX_ACCOUNT', label: '해외계좌', facts: ['hasFxAccount'] },
@@ -414,5 +414,5 @@
     getProduct: getProduct,
   };
 
-  WSP.store = WSP.createStore(initialBankState, { storageKey: 'wsp.bankState.v4' });
+  WSP.store = WSP.createStore(initialBankState, { storageKey: 'wsp.bankState.v6' });
 })();
