@@ -12,7 +12,6 @@
   const store = WSP.store;
   const SC = WSP.scenario;
   const esc = WSP.ui.esc;
-  const man = WSP.utils.formatMan;
 
   const root = document.getElementById('demo-panel');
   if (!root) return;
@@ -56,7 +55,7 @@
       row('월급', won(income && income.value)) +
       row('지출', won(expense && expense.value)) +
       row('해외계좌', s.facts.hasFxAccount === true ? '있음' : '없음') +
-      '</div><p class="dp-lead">보유 계좌에서 확인한 내용</p></section>'
+      '</div></section>'
     );
   }
 
@@ -70,30 +69,27 @@
     return '아직 모름';
   }
 
+  function paceText(info) {
+    if (!info || !info.items || !info.items.investPace) return '아직 모름';
+    if (info.declined && info.declined.indexOf('investPace') !== -1) return '답하지 않음';
+    const value = info.items.investPace.value;
+    if (value == null) return '아직 모름';
+    return WSP.assetAdvisor.display('investPace', value);
+  }
+
   function situation(a) {
-    const ctx = WSP.app.session.customerContext;
     const info = a && a.info;
-    const monthly = a && a.proposal && a.proposal.basis && a.proposal.basis.monthly != null ? a.proposal.basis.monthly : null;
-    const productId = ctx && ctx.selectedProductId;
-    const product = productId ? SC.getProduct(productId) : null;
     const rows = [
       ['목표', a && a.goalText ? a.goalText : '아직 없음'],
-      ['다시 묻지 않음', '월급, 지출, 예금'],
-      ['아직 모름', '다른 증권 투자금 ' + gapText(info, 'investAssets') + ' · 예정된 목돈 ' + gapText(info, 'plannedLumpSum')],
-      ['참고 금액', monthly != null ? '월 ' + man(monthly) : '아직 없음'],
-      ['이 금액', monthly != null ? '계좌 기준 계산 · 적합 투자금 아님 · 고객이 고칠 수 있음' : '아직 없음'],
-      ['손실 감내', '아직 확인 안 함'],
-      ['고른 상품', product ? product.name : '아직 없음'],
+      ['투자 속도', paceText(info)],
+      ['다른 증권 투자금', gapText(info, 'investAssets')],
+      ['목돈 지출 계획', gapText(info, 'plannedLumpSum')],
     ];
     return (
-      '<section class="dp-card"><h2>지금 파악한 상황</h2><div class="dp-nums dp-nums--lines">' +
+      '<section class="dp-card"><h2>해결패스가 알고 있는 정보</h2><div class="dp-nums dp-nums--lines">' +
       rows.map((c) => '<div class="dp-num"><span>' + esc(c[0]) + '</span><strong>' + esc(c[1]) + '</strong></div>').join('') +
       '</div></section>'
     );
-  }
-
-  function asking() {
-    return '';
   }
 
   function procedures(s) {
@@ -127,21 +123,6 @@
     );
   }
 
-  function sceneCaption() {
-    const join = WSP.app.fsms.join.state;
-    const id = WSP.ui.current() ? WSP.ui.current().id : 'home';
-    const j = WSP.app.session.join;
-    let body = '상담을 시작하면 계좌에 없는 것만 묻습니다.';
-    if (join === 'COMPLETED' || id === 'apply' || id === 'apply-result' || join === 'READY_TO_APPLY') {
-      body = '고객이 승인한 뒤에만 개설을 요청합니다. 개설은 투자 실행이 아닙니다.';
-    } else if (join === 'TASK_OPEN' || join === 'RECHECKING' || (j && j.tasks && j.tasks.length > 0 && join !== 'IDLE')) {
-      body = '화면을 닫으면 은행 기록으로 완료를 확인합니다.';
-    } else if (join !== 'IDLE') {
-      body = '이미 끝난 실명확인은 건너뛰고 외환거래부터입니다.';
-    }
-    return '<section class="dp-card dp-scene"><p class="dp-kicker">이번 장면</p><p class="dp-lead">' + esc(body) + '</p></section>';
-  }
-
   function remainReady(s) {
     const st = WSP.app.fsms.join.state;
     return s.facts.fxRegistered === true && (st === 'OPTIONS_READY' || st === 'REMAINING');
@@ -149,16 +130,7 @@
 
   function sync() {
     const s = store.getState();
-    $('#dp-left').innerHTML =
-      customerCard(s) +
-      sceneCaption() +
-      situation(WSP.app.session.asset) +
-      asking(s) +
-      '<details class="dp-card dp-fold"' +
-      (remainReady(s) ? ' open' : '') +
-      '><summary>선행 조건 상세</summary>' +
-      procedures(s) +
-      '</details>';
+    $('#dp-left').innerHTML = customerCard(s) + situation(WSP.app.session.asset) + procedures(s);
     $('#dp-right').innerHTML = '';
   }
 

@@ -29,46 +29,51 @@
         I.spark +
         '</span><h2>' +
         esc(p.name) +
-        '<br>가입을 도와드릴게요</h2><p>가입 조건 중 부족한 것을 확인하고, 해결 순서와 필요한 업무 화면을 안내해요.</p></div>' +
+        '<br>가입을 도와드릴게요</h2></div>' +
         '<div class="card"><h3 class="card__title">' +
         I.shield +
         '조회·분석 동의 (필수)</h3><ul class="consent-list">' +
-        '<li>실명확인·계좌·인증서·고객정보 등록 기록 (우리은행)</li>' +
+        '<li>실명확인·계좌·인증서·고객정보 등록 기록</li>' +
         '<li>마이데이터로 연결된 다른 은행 계좌 목록</li>' +
-        '<li>로그인 때 확인된 휴대폰 본인 명의 여부</li></ul>' +
-        '<p class="fineprint">은행이 이미 아는 정보는 다시 묻지 않아요.</p></div>' +
+        '<li>로그인 때 확인된 휴대폰 본인 명의 여부</li></ul></div>' +
         '<div class="card card--outline"><h3 class="card__title">' +
         I.lock +
         '이 동의로 하지 않는 것</h3><ul class="consent-list consent-list--no">' +
-        '<li>상품 가입 신청 — 마지막에 고객님 승인을 따로 받아요</li>' +
-        '<li>가입 조건을 바꾸거나 새로 만드는 것 — 조건은 은행 기준을 그대로 써요</li></ul></div>' +
+        '<li>상품 가입 자동 신청</li></ul></div>' +
         '</div><div class="screen-footer"><div class="btn-row"><button class="btn btn--ghost" data-action="join-exit">다음에 할게요</button><button class="btn btn--primary" data-action="join-agree">가입 조건 확인</button></div></div>'
       );
     },
   });
 
   /* ---------- 대화 + 체크리스트 ---------- */
-  let seenTimer = 0;
   function checklist(j) {
     const ev = j.evaluation;
     const ids = ev ? ev.conditions.map((c) => c.id) : SC.getProduct(j.productId).conditions;
     const byId = {};
     if (ev) ev.conditions.forEach((c) => (byId[c.id] = c));
-    const seen = j.seenMet || [];
+    const checking = Array.isArray(j.checkPending);
+    const done = j.checkDone || [];
+    const freshId = j.checkFresh;
     const entered = !!j.listSeen;
-    const met = ev ? ev.conditions.filter((c) => c.status === 'MET').length : 0;
+    j.listSeen = true;
+    j.checkFresh = null;
+    const met = ev
+      ? ev.conditions.filter((c) => c.status === 'MET' && (!checking || done.indexOf(c.id) !== -1)).length
+      : 0;
     const rows = ids
       .map((id, i) => {
         const c = byId[id];
         const cond = SC.CONDITIONS[id];
         const fact = cond && SC.FACTS[cond.fact];
         const label = fact ? fact.short : cond ? cond.label : id;
-        const isMet = !!(c && c.status === 'MET');
-        const fresh = isMet && seen.indexOf(id) === -1;
+        const revealed = !checking || done.indexOf(id) !== -1;
+        const isMet = revealed && !!(c && c.status === 'MET');
+        const loading = checking && !revealed;
         return (
           '<li class="ck__row' +
           (isMet ? ' is-met' : '') +
-          (fresh ? ' is-new' : '') +
+          (loading ? ' is-loading' : '') +
+          (freshId === id ? ' is-new' : '') +
           (entered ? '' : ' is-in') +
           '"' +
           (entered ? '' : ' style="animation-delay:' + i * 80 + 'ms"') +
@@ -95,7 +100,9 @@
 
   function freshReply(chat) {
     const last = chat && chat[chat.length - 1];
-    return !!(last && last.role === 'ai' && last.at && Date.now() - last.at < 1000);
+    if (!last || last.role !== 'ai' || last.chipsShown) return false;
+    last.chipsShown = true;
+    return !!(last.at && Date.now() - last.at < 1600);
   }
 
   function optionCards(j) {
@@ -237,7 +244,6 @@
         UI.chatHeader(jf().can('EXIT') ? { action: 'join-exit', label: '그만하기' } : null) +
         '<div class="screen-body join-body chat-body" id="join-body">' +
         UI.chatIntro('AI 가입 지원', j.chat[0] && j.chat[0].at) +
-        UI.contextCard() +
         checklist(j) +
         '<div class="chat-log">' +
         UI.chatLog(j.chat, j.thinking) +
@@ -246,18 +252,10 @@
         actionPanel(j) +
         '</div>' +
         chips +
-        UI.chatInput('join-input', 'join-send', canTalk ? '상황을 편하게 말씀해 주세요' : '지금은 위 버튼으로 진행해 주세요', !canTalk)
+        UI.chatInput('join-input', 'join-send', '', false, true)
       );
     },
     mount(el, params, ctx) {
-      clearTimeout(seenTimer);
-      seenTimer = setTimeout(() => {
-        seenTimer = 0;
-        const j = app().session.join;
-        if (!j) return;
-        j.listSeen = true;
-        j.seenMet = j.evaluation ? j.evaluation.conditions.filter((c) => c.status === 'MET').map((c) => c.id) : j.seenMet || [];
-      }, 700);
       UI.scrollToLatest(el.querySelector('#join-body'));
       if (ctx && ctx.first) WSP.joinFlow.resume();
     },
@@ -280,7 +278,6 @@
       const head =
         UI.appbar('가입 정보 확인') +
         '<div class="screen-body">' +
-        UI.notice('<strong>가입 준비 완료는 가입 완료가 아니에요.</strong><br>내용을 확인하고 승인하시면 그때 은행에 가입을 요청해요.', 'info', I.info) +
         (j.applyNotice ? UI.notice(esc(j.applyNotice.text), j.applyNotice.tone || 'warning', I.alert) : '');
       const tail =
         '<div class="card card--outline"><h3 class="card__title">' +
@@ -298,7 +295,6 @@
         const market = params.market || (j.terms && j.terms.market) || p.markets[0];
         return (
           head +
-          (ctx && ctx.monthly ? UI.notice('자산관리 상담에서 정한 방향은 월 ' + man(ctx.monthly) + ' 투자예요. 실제 주문은 계좌를 연 뒤 고객님이 직접 해요.', 'neutral', I.target) : '') +
           '<div class="card"><h3 class="card__title">' +
           esc(p.name) +
           '</h3>' +
@@ -318,7 +314,6 @@
       const monthly = (j.terms && j.terms.monthly) || (ctx && ctx.monthly) || 300000;
       return (
         head +
-        (ctx ? UI.notice('자산관리 상담에서 정한 방향(월 ' + man(ctx.monthly || 0) + ' · ' + (ctx.months || '-') + '개월)을 기본값으로 넣었어요. 바꿔도 돼요.', 'neutral', I.target) : '') +
         '<div class="card"><h3 class="card__title">' +
         esc(p.name) +
         '</h3>' +
@@ -374,7 +369,7 @@
         icon: I.check,
         tone: 'success',
         title: p.kind === 'BROKERAGE' ? '해외주식 계좌 개설이 확인됐어요' : '가입이 완료됐어요',
-        desc: p.kind === 'BROKERAGE' ? '은행 조회에서 계좌 개설이 확인됐어요. 실제 투자나 자동이체는 실행하지 않았어요.' : '은행 처리 결과로 확인했어요.',
+        desc: '',
         rows: rows,
         foot: '<button class="btn btn--primary btn--block" data-action="' + newAction + '">홈으로</button>',
       };
@@ -428,9 +423,9 @@
         v.icon +
         '</div><h2 class="result__title">' +
         esc(v.title) +
-        '</h2><p class="result__desc">' +
-        esc(v.desc) +
-        '</p></div>' +
+        '</h2>' +
+        (v.desc ? '<p class="result__desc">' + esc(v.desc) + '</p>' : '') +
+        '</div>' +
         (v.rows.length ? '<div class="card">' + UI.kvRows(v.rows) + '</div>' : '') +
         '</div>' +
         (v.foot ? '<div class="screen-footer">' + v.foot + '</div>' : '')
@@ -532,7 +527,7 @@
             track +
             '"' +
             (d.handoffConsent ? ' checked' : '') +
-            ' /><span>위 요약을 상담사에게 전달하는 데 동의해요. 상담사가 처음부터 다시 묻지 않도록 쓰여요.</span></label>') +
+            ' /><span>위 요약을 상담사에게 전달하는 데 동의해요.</span></label>') +
         result +
         '</div><div class="screen-footer">' +
         (accepted

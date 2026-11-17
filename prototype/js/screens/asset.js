@@ -20,30 +20,24 @@
     white: true,
     render() {
       if (af().state !== 'CONSENT') return UI.appbar('AI 자산관리 상담') + '<div class="screen-body"><p class="lead">진행 중인 동의 요청이 없어요.</p></div>';
-      const fin = WSP.store.getState().finance;
       return (
         UI.appbar('AI 자산관리 상담') +
         '<div class="screen-body"><div class="consent-hero"><span>' +
         I.target +
-        '</span><h2>목표에 맞춰<br>모을 돈과 투자할 돈을 정해요</h2><p>연결된 금융 정보와 고객님 답변으로 계산하고, 방향을 제안해요.</p></div>' +
+        '</span><h2>목표에 맞춰<br>모을 돈과 투자할 돈을 정해요</h2></div>' +
         '<div class="card"><h3 class="card__title">' +
         I.shield +
         '조회·분석 동의 (필수)</h3><ul class="consent-list">' +
-        '<li>마이데이터로 연결된 기관(' +
-        esc(fin.linked.join(', ')) +
-        ')의 잔액·입출금·카드 내역</li><li>상담 중 고객님이 답한 정보</li></ul>' +
-        '<p class="fineprint">연결되지 않은 기관(' +
-        esc(fin.notLinked.join(', ')) +
-        ')의 정보는 쓰지 않아요.</p></div>' +
+        '<li>마이데이터로 연결된 기관의 잔액·입출금·카드 내역</li><li>상담 중 고객님이 답한 정보</li></ul></div>' +
         '<div class="card card--outline"><h3 class="card__title">' +
         I.lock +
-        '이 상담에서 하지 않는 것</h3><ul class="consent-list consent-list--no"><li>상품 가입·이체·해지</li><li>방향 선택을 가입으로 처리하는 것 — 가입은 상품을 고른 뒤 따로 해요</li></ul></div>' +
+        '이 상담에서 하지 않는 것</h3><ul class="consent-list consent-list--no"><li>상품 가입·이체·해지</li></ul></div>' +
         '</div><div class="screen-footer"><div class="btn-row"><button class="btn btn--ghost" data-action="asset-decline">다음에 할게요</button><button class="btn btn--primary" data-action="asset-agree">상담 시작</button></div></div>'
       );
     },
   });
 
-  const INFO_KEYS = ['monthlyIncome', 'monthlyExpense', 'liquidAssets', 'investAssets', 'debt', 'goalAmount', 'goalMonths', 'plannedLumpSum', 'monthlySavingPref'];
+  const INFO_KEYS = ['monthlyIncome', 'monthlyExpense', 'liquidAssets', 'investPace', 'investAssets', 'debt', 'goalAmount', 'goalMonths', 'plannedLumpSum', 'monthlySavingPref'];
 
   /** 정보 다시 확인: 값과 고치기 버튼만 보여 준다 */
   function infoEditor(a) {
@@ -79,7 +73,9 @@
 
   function freshReply(chat) {
     const last = chat && chat[chat.length - 1];
-    return !!(last && last.role === 'ai' && last.at && Date.now() - last.at < 1000);
+    if (!last || last.role !== 'ai' || last.chipsShown) return false;
+    last.chipsShown = true;
+    return !!(last.at && Date.now() - last.at < 1600);
   }
 
   function chipButton(label, attrs, i, extra) {
@@ -88,7 +84,7 @@
 
   function actionPanel(a) {
     const st = af().state;
-    if (a.thinking) return '';
+    if (a.thinking || a.pendingAccept) return '';
     const rise = freshReply(a.chat) ? ' is-in' : '';
     if (st === 'GOAL')
       return (
@@ -107,11 +103,7 @@
         ['STOP', '지금 정보로 알려주세요', ' chip--accent'],
       ];
       return (
-        '<div class="act"><span class="act__meta">질문 ' +
-        a.questionsAsked +
-        '/' +
-        SC.POLICY.assetQuestionLimit +
-        '</span><div class="chip-row' +
+        '<div class="act"><div class="chip-row' +
         rise +
         '">' +
         q.options.map((o, i) => chipButton(o[0], 'data-action="asset-chip" data-value="' + o[1] + '" data-label="' + esc(o[0]) + '"', i, ' chip--lg')).join('') +
@@ -123,7 +115,7 @@
       );
     }
     if (st === 'REVIEW')
-      return '<div class="act">' + alternativesCard(a) + '<button class="btn btn--primary btn--block" data-action="asset-accept">이 방향으로 할게요</button><p class="act__hint">조건을 바꾸려면 아래에 입력해 주세요. 예: "기간을 3년으로", "월 80만원씩"</p></div>';
+      return '<div class="act">' + alternativesCard(a) + '<button class="btn btn--primary btn--block" data-action="asset-accept">이 방향으로 할게요</button></div>';
     if (st === 'NEXT_ACTION')
       return (
         '<div class="act"><div class="next-grid">' +
@@ -165,28 +157,22 @@
     return '';
   }
 
-  const TALK = ['GOAL', 'ASKING', 'REVIEW'];
-
   UI.registerScreen('asset', {
     title: 'AI 자산관리 상담',
     white: true,
     render() {
       const a = app().session.asset;
       if (!a) return UI.appbar('AI 자산관리 상담') + '<div class="screen-body"><p class="lead">진행 중인 상담이 없어요.</p><button class="btn btn--primary" data-action="asset-start">상담 시작</button></div>';
-      const st = af().state;
-      const canTalk = TALK.indexOf(st) !== -1 && !a.thinking;
-      const ph = { GOAL: '목표를 말씀해 주세요', ASKING: '편하게 답해 주세요 (예: 3천만원 정도)', REVIEW: '바꿀 조건을 입력해 주세요' }[st] || '지금은 위 버튼으로 진행해 주세요';
       return (
         UI.chatHeader(af().can('END') || af().can('EXIT') ? { action: 'asset-end', label: '분석 종료' } : null) +
         '<div class="screen-body asset-body chat-body" id="asset-body">' +
         UI.chatIntro('AI 자산관리 상담', a.chat[0] && a.chat[0].at) +
-        UI.contextCard() +
         '<div class="chat-log">' +
         UI.chatLog(a.chat, a.thinking) +
         '</div>' +
         actionPanel(a) +
         '</div>' +
-        UI.chatInput('asset-input', 'asset-send', ph, !canTalk)
+        UI.chatInput('asset-input', 'asset-send', '', false, true)
       );
     },
     mount(el, params, ctx) {
@@ -206,16 +192,13 @@
       return (
         UI.appbar('상품 둘러보기') +
         '<div class="screen-body">' +
-        UI.contextCard() +
         '<div class="ctx-card"><span>' +
         I.target +
         '상담에서 정한 방향</span><strong>' +
         esc(t.purpose) +
         (t.monthly ? ' · 월 ' + man(t.monthly) : '') +
         (t.months ? ' · ' + t.months + '개월' : '') +
-        '</strong>' +
-        (t.goalText ? '<small>"' + esc(t.goalText) + '"</small>' : '') +
-        '</div>' +
+        '</strong></div>' +
         SC.PRODUCTS.map((p) => {
             const pick = p.id === SC.DEMO.productId;
             return (

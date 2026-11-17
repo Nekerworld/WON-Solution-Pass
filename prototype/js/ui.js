@@ -170,7 +170,6 @@
       esc(m.text).replace(/\n/g, '<br>') +
       '</div>' +
       figures(m.figures) +
-      (m.why ? '<div class="msg__why">' + I.question.replace('<svg', '<svg width="13" height="13"') + esc(m.why) + '</div>' : '') +
       '</div>' +
       clock(m.at) +
       '</div>'
@@ -180,7 +179,13 @@
   function chatLog(messages, thinking) {
     const list = messages || [];
     return (
-      list.map((m, i) => renderMessage(m, i === list.length - 1 && m.at && Date.now() - m.at < 1000)).join('') +
+      list
+        .map((m) => {
+          const fresh = !m.entered && m.at && Date.now() - m.at < 1200;
+          if (m.at) m.entered = true;
+          return renderMessage(m, fresh);
+        })
+        .join('') +
       (thinking ? '<div class="thinking" aria-label="AI가 생각하는 중"><span class="msg__avatar">' + BOT_FACE + '</span><span class="thinking__dots"><i></i><i></i><i></i></span>AI가 확인하고 있어요</div>' : '')
     );
   }
@@ -196,13 +201,7 @@
       '</button><div class="appbar__title">' +
       esc(WSP.store.getState().customer.name) +
       '님의 해결패스</div><span class="chat-head__ai" aria-hidden="true">AI<small>챗봇</small></span></header>' +
-      '<div class="chat-tools"><button data-action="noop">' +
-      I.msg +
-      '톡상담</button><button data-action="noop">' +
-      I.eyeOff +
-      '상담숨기기</button>' +
-      (exit ? '<button data-action="' + exit.action + '">' + I.refresh + esc(exit.label) + '</button>' : '<button data-action="noop">' + I.refresh + '처음으로</button>') +
-      '</div>'
+      (exit ? '<div class="chat-tools"><button data-action="' + exit.action + '">' + I.refresh + esc(exit.label) + '</button></div>' : '')
     );
   }
 
@@ -211,11 +210,9 @@
     const d = new Date(startedAt || Date.now());
     const st = WSP.store.getState();
     const name = st.customer.name;
-    const linked = (st.finance && st.finance.linked) || [];
-    const linkText = linked.length > 1 ? linked[0] + '이랑 ' + linked.slice(1).join(', ') : linked[0] || '연결된 기관';
     const hello = st.customer.firstTimeCustomer
-      ? esc(name) + ' 고객님, 우리은행은 처음이시네요.<br>' + esc(linkText) + '는 연결되어 있어서 그 내역으로 바로 볼게요.'
-      : esc(name) + ' 고객님, 안녕하세요.<br>' + esc(linkText) + ' 내역으로 바로 볼게요.';
+      ? esc(name) + ' 고객님, 우리은행은 처음이시네요.'
+      : esc(name) + ' 고객님, 안녕하세요.';
     return (
       '<div class="chat-intro"><span class="chat-intro__date">' +
       d.getFullYear() +
@@ -324,15 +321,16 @@
     );
   }
 
-  function chatInput(id, action, placeholder, disabled) {
+  function chatInput(id, action, placeholder, disabled, sendOff) {
+    const blockSend = !!disabled || !!sendOff;
     return (
       '<div class="chat-input"><button class="chat-input__plus" data-action="noop" aria-label="더보기">' +
       I.plus +
       '</button><div class="chat-input__field"><input id="' +
       id +
-      '" data-enter="' +
-      action +
-      '" maxlength="120" placeholder="' +
+      '"' +
+      (blockSend ? '' : ' data-enter="' + action + '"') +
+      ' maxlength="120" placeholder="' +
       esc(placeholder) +
       '" aria-label="메시지 입력" autocomplete="off"' +
       (disabled ? ' disabled' : '') +
@@ -656,7 +654,9 @@
         })
         .join('') +
       '</ol></div>';
-    if (finished) {
+    if (state.status === 'COMPLETED') {
+      html += '<div class="tm-done" aria-label="완료"><span class="tm-done__mark">' + I.check + '</span></div>';
+    } else if (finished) {
       const st = TM_STATUS[state.status];
       html += '<div class="tm-result tm-result--' + st[0] + '"><strong>' + esc(st[1]) + '</strong><p>' + esc(state.message || '') + '</p></div>';
     }

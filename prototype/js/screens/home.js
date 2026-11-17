@@ -105,8 +105,7 @@
     title: '홈',
     async render() {
       const r = await bank.getAccountSummary();
-      const s = app().session;
-      const hide = s.ui.hideBalance;
+      const cookieLine = WSP.assetFlow.pickCookie(WSP.store.getState());
 
       let accts = '';
       if (!r.ok) accts = '<div class="w-acct">' + UI.notice('계좌 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.', 'warning', I.alert) + '</div>';
@@ -128,10 +127,10 @@
           name: r.data.account.name,
           sub: '우리 ' + r.data.account.number,
           copy: true,
-          balance: balanceHtml(hide, Number(r.data.account.balance || 0).toLocaleString('ko-KR'), ' 원'),
+          balance: balanceHtml(false, Number(r.data.account.balance || 0).toLocaleString('ko-KR'), ' 원'),
           transfer: true,
         });
-        if (r.data.fxAccount) accts += accountCard({ name: r.data.fxAccount.name, sub: '우리 ' + r.data.fxAccount.number, copy: true, tag: '외화', balance: balanceHtml(hide, '0.00', ' USD'), transfer: true });
+        if (r.data.fxAccount) accts += accountCard({ name: r.data.fxAccount.name, sub: '우리 ' + r.data.fxAccount.number, copy: true, tag: '외화', balance: balanceHtml(false, '0.00', ' USD'), transfer: true });
         r.data.savings.forEach((sv) => {
           const p = SC.getProduct(sv.productId);
           const t = sv.terms || {};
@@ -139,7 +138,7 @@
             name: p.name,
             sub: t.monthly ? '매월 ' + man(t.monthly) + (t.months ? ' · ' + t.months + '개월' : '') : t.market ? t.market + ' 주식 거래' : '가입 완료',
             tag: p.type,
-            balance: balanceHtml(hide, '0', p.kind === 'BROKERAGE' ? ' 원 평가금액' : ' 원'),
+            balance: balanceHtml(false, '0', p.kind === 'BROKERAGE' ? ' 원 평가금액' : ' 원'),
             transfer: false,
           });
         });
@@ -169,15 +168,7 @@
           '</div>'
         : '';
 
-      const notice = s.ui.disclaimerClosed
-        ? ''
-        : '<div class="w-notice"><span class="w-notice__bell">' +
-          I.bell +
-          '</span><p>이 앱은 경진대회 시연용 목업이에요.<br>상품·조건·금액은 모두 가상의 값이에요.</p><button data-action="close-disclaimer" aria-label="안내 닫기">' +
-          I.x +
-          '</button></div>';
-
-      const svcItem = (action, icon, tone, title, desc) =>
+      const svcItem = (action, icon, tone, title) =>
         '<button class="w-svc__item" data-action="' +
         action +
         '"><span class="w-svc__icon is-' +
@@ -186,12 +177,10 @@
         icon +
         '</span><span><strong>' +
         esc(title) +
-        '</strong><em>' +
-        esc(desc) +
-        '</em></span></button>';
+        '</strong></span></button>';
 
       return (
-        '<header class="w-top"><div class="w-mode"><button class="is-on" data-action="noop">일반홈</button><button data-action="noop">쉬운</button></div><div class="w-top__icons">' +
+        '<header class="w-top"><div class="w-top__icons">' +
         '<button data-action="noop" aria-label="지갑">' +
         I.wallet +
         '</button><button class="w-top__ai" data-action="asset-start" aria-label="AI 자산관리 상담">' +
@@ -202,35 +191,27 @@
         I.menu +
         '</button></div></header>' +
         '<div class="screen-body w-home">' +
-        notice +
         '<div class="w-strip">' +
         HOME_SCENE +
-        '<div class="w-strip__bar"><button data-action="noop">' +
-        sz(I.gear, 14) +
-        '홈계좌설정</button><button data-action="toggle-balance" role="switch" aria-checked="' +
-        hide +
-        '">잔액숨김<span class="w-switch' +
-        (hide ? ' is-on' : '') +
-        '"><i></i></span></button></div></div>' +
+        '</div>' +
         accts +
         resume +
-        '<button class="w-allacct" data-action="noop">전체계좌보기</button>' +
         '<h3 class="w-h3">추천서비스</h3><div class="w-hscroll">' +
         '<div class="w-svc is-pink">' +
-        svcItem('asset-start', I.target, 'blue', 'AI 자산관리 상담', '모을 돈과 투자할 돈을 함께 정해요') +
-        svcItem('go-products', I.product, 'violet', '상품 가입', 'AI가 조건과 순서를 안내해요') +
-        svcItem('noop', I.wallet, 'sky', '우리WON지갑', '모바일 신분증 등 생활 서비스') +
+        svcItem('asset-start', I.target, 'blue', 'AI 자산관리 상담') +
+        svcItem('go-products', I.product, 'violet', '상품 가입') +
+        svcItem('noop', I.wallet, 'sky', '우리WON지갑') +
         '</div><div class="w-svc is-blue">' +
-        svcItem('noop', I.phone, 'blue', '우리WON모바일', '은행이 만든 알뜰폰 통신') +
-        svcItem('noop', I.globe, 'teal', '환전주머니', '여행 환전을 손쉽게 준비해요') +
-        svcItem('noop', I.coin, 'sky', 'ATM 출금', '카드 없이 휴대폰으로 출금') +
+        svcItem('noop', I.phone, 'blue', '우리WON모바일') +
+        svcItem('noop', I.globe, 'teal', '환전주머니') +
+        svcItem('noop', I.coin, 'sky', 'ATM 출금') +
         '</div></div>' +
         '<h3 class="w-h3">우리금융그룹 서비스</h3><div class="w-hscroll w-group">' +
         [
-          ['보험', '#7b5cff', '나를 지켜주는\n든든한 보장', I.shield],
-          ['캐피탈', '#11a37f', '내 자동차\n대출 한도', I.route],
-          ['증권', '#2488f3', '새로운\n투자 정보', I.stock],
-          ['카드', '#e2537a', '혜택 많은\n카드 찾기', I.wallet],
+          ['보험', '#7b5cff', I.shield],
+          ['캐피탈', '#11a37f', I.route],
+          ['증권', '#2488f3', I.stock],
+          ['카드', '#e2537a', I.wallet],
         ]
           .map(
             (g) =>
@@ -238,21 +219,19 @@
               g[1] +
               '">' +
               g[0] +
-              '</strong><span>' +
-              esc(g[2]).replace('\n', '<br>') +
-              '</span><i style="color:' +
+              '</strong><i style="color:' +
               g[1] +
               '">' +
-              g[3] +
+              g[2] +
               '</i></button>'
           )
           .join('') +
         '</div>' +
-        '<button class="w-noticebar" data-action="noop"><em>공지</em><span>이 화면은 경진대회 시연용 모의 화면이에요</span>' +
-        I.chevron +
-        '</button>' +
         '</div>' +
-        UI.bottomNav('home')
+        UI.bottomNav('home') +
+        '<div class="fortune"><button class="fortune__bubble" type="button" data-action="prompt-cookie"><span class="fortune__text">' +
+        esc(cookieLine) +
+        '</span></button><button class="fortune__send" type="button" data-action="prompt-cookie-send">물어보기</button></div>'
       );
     },
   });
@@ -303,7 +282,7 @@
         I.menu +
         '</button></div></header>' +
         '<div class="screen-body w-mall">' +
-        '<button class="w-mall__banner" data-action="open-product" data-product="OVERSEAS_STOCK"><span><strong>처음 거래 고객도 해외주식까지<br>가입 순서는 AI가 정리해 드려요</strong><em>WON 해외주식 계좌 · 시연용 배너</em></span><i>' +
+        '<button class="w-mall__banner" data-action="open-product" data-product="OVERSEAS_STOCK"><span><strong>처음 거래 고객도 해외주식까지<br>가입 순서는 AI가 정리해 드려요</strong><em>WON 해외주식 계좌</em></span><i>' +
         sz(I.globe, 52) +
         '</i><span class="w-pager">&lsaquo; 2 / 5 &rsaquo;</span></button>' +
         '<div class="w-mall__stats">' +
@@ -398,7 +377,6 @@
         '</button></div>' +
         LIST_GROUPS.map((x) => '<section class="w-plist__sec" id="pl-' + x[0] + '"><h3>' + x[1] + '</h3>' + x[2].map(row).join('') + '<button class="w-more" data-action="noop">더보기 ' + sz(I.down, 13) + '</button></section>').join('') +
         '<section class="w-plist__sec"><h3>기타서비스</h3><button class="w-plist__row" data-action="noop"><strong>상품 금리조회</strong><span>예적금 상품 금리를 한눈에 비교해 보세요</span></button></section>' +
-        '<p class="w-fine">목록의 상품명과 금리는 시연용 가상 값이에요.</p>' +
         '</div>'
       );
     },
@@ -474,21 +452,11 @@
       return (
         UI.appbar(header, { right: '<button class="icon-btn" data-action="noop" aria-label="관심 상품">' + I.heart + '</button>' }) +
         '<div class="screen-body w-pd">' +
-        (ctx ? UI.contextCard() : '') +
         '<h2 class="w-pd__title">' +
         title +
         '</h2><div class="w-pd__chips">' +
         chips +
         '</div>' +
-        (ctx
-          ? '<div class="w-pd__ctx">' +
-            I.target +
-            '<p><strong>자산관리 상담에서 정한 방향</strong><br>' +
-            esc(ctx.purpose) +
-            (ctx.monthly ? ' · 월 ' + man(ctx.monthly) + (p.kind === 'BROKERAGE' ? ' 투자' : '') : '') +
-            (ctx.months ? ' · ' + ctx.months + '개월' : '') +
-            '<br><span>상품을 고른 것은 가입이 아니에요. 아래 버튼으로 가입 지원이 시작돼요.</span></p></div>'
-          : '') +
         '<div class="w-pd__box">' +
         box +
         '</div>' +
@@ -506,7 +474,7 @@
         sz(I.chat, 16) +
         '가입하려면 무엇이 필요한가요?</strong><div class="w-faq__a"><ul>' +
         p.conditions.map((id) => '<li>' + esc(SC.CONDITIONS[id].label) + '</li>').join('') +
-        '</ul><p class="w-faq__note">＊ 부족한 조건은 AI와 함께 가입할 때 해결 순서를 안내해 드려요.</p></div></div>' +
+        '</ul></div></div>' +
         '<button class="w-more w-more--box" data-action="noop">더보기</button>' +
         '<hr class="w-sep" />' +
         '<div class="w-rows">' +
@@ -521,7 +489,6 @@
           .map((x) => '<button data-action="noop"><i style="background:' + x[1] + ';color:' + x[2] + '">' + x[3] + '</i>' + x[0] + '</button>')
           .join('') +
         '</div>' +
-        '<p class="w-pd__law"><strong>준법감시인 심의필</strong>경진대회 시연용 모의 화면으로 심의 번호가 없어요.</p>' +
         '</div>' +
         '<div class="w-pd__foot"><button class="w-btn w-btn--soft" data-action="noop">상담</button><button class="w-btn" data-action="join-start" data-product="' +
         p.id +

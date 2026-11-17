@@ -24,13 +24,15 @@
     goalMonths: { label: '목표 기간', kind: 'months' },
     plannedLumpSum: { label: '예정된 목돈 지출', kind: 'won' },
     monthlySavingPref: { label: '희망 월 적립액', kind: 'won' },
+    /** 남는 돈 중 투자에 쓸 비율(%). 고객이 고른 값만 쓴다. */
+    investPace: { label: '투자 속도', kind: 'pace' },
   });
 
   const PURPOSES = Object.freeze({
     INVEST: {
       label: '해외주식 투자 시작',
       critical: ['monthlyIncome', 'monthlyExpense', 'liquidAssets'],
-      important: ['investAssets', 'plannedLumpSum'],
+      important: ['investPace', 'investAssets', 'plannedLumpSum'],
       minimum: ['monthlyIncome', 'monthlyExpense'],
       tags: ['해외주식'],
     },
@@ -49,6 +51,13 @@
       minimum: ['monthlyExpense'],
       tags: ['비상자금'],
     },
+    ORIENT: {
+      label: '계좌 정보로 시작',
+      critical: ['monthlyExpense', 'liquidAssets'],
+      important: ['monthlyIncome'],
+      minimum: ['monthlyExpense'],
+      tags: [],
+    },
   });
 
   /** 질문 목록. 생활 언어와 범위 답변을 허용한다. */
@@ -56,7 +65,7 @@
     goalAmount: {
       id: 'Q_GOAL_AMOUNT',
       key: 'goalAmount',
-      text: '목표 금액이 어느 정도인가요? 정확하지 않아도, 대략적인 범위여도 괜찮아요.',
+      text: '목표 금액이 어느 정도인가요?',
       why: '필요한 월 적립액을 계산하려면 목표 금액이 필요해요.',
       options: [
         ['2천만원 정도', 20000000],
@@ -106,6 +115,17 @@
         ['150만원 정도', 1500000],
         ['200만원 정도', 2000000],
         ['250만원 정도', 2500000],
+      ],
+    },
+    investPace: {
+      id: 'Q_PACE',
+      key: 'investPace',
+      text: '투자는 얼마나 공격적으로 하고 싶으세요?',
+      why: '남는 돈 중에서 투자에 쓸 비율을 정하는 데 필요해요.',
+      options: [
+        ['조금만', 30],
+        ['보통으로', 50],
+        ['공격적으로', 90],
       ],
     },
     investAssets: {
@@ -179,10 +199,30 @@
     return known(info, key) ? Number(info.items[key].value) : null;
   }
 
+  /** 투자 속도는 0~100%만 유효하다. 만원 단위로 잘못 저장된 값은 100%로 자른다. */
+  function pacePercent(value) {
+    if (value == null || value === '') return null;
+    const n = Number(value);
+    if (isNaN(n)) return null;
+    return Math.min(100, Math.max(0, Math.round(n)));
+  }
+
+  /** 투자 속도(%)의 짧은 이름. 90 이상은 공격적이다. */
+  function paceName(pct) {
+    const n = Number(pct);
+    if (n >= 90) return '공격적';
+    if (n >= 50) return '보통';
+    return '조금만';
+  }
+
   function display(key, value) {
     if (value == null) return '미확인';
     const def = ITEMS[key];
     if (def && def.kind === 'months') return value % 12 === 0 ? value / 12 + '년' : value + '개월';
+    if (def && def.kind === 'pace') {
+      const pct = pacePercent(value);
+      return paceName(pct) + ' · ' + pct + '%';
+    }
     return man(value);
   }
 
@@ -224,8 +264,18 @@
     add('needMonthly', '필요 월 적립액', need, '(모아야 할 총액 − 목표에 쓸 예금) ÷ 목표 기간', ['goalAmount', 'plannedLumpSum', 'liquidAssets', 'goalMonths']);
     const capacity = surplus != null ? roundDown(Math.max(0, surplus) * 0.7) : null;
     add('capacity', '무리 없는 월 적립 여력', capacity, '월 여유자금 × 70%', ['monthlyIncome', 'monthlyExpense', 'debtPayment']);
-    const invest = capacity != null ? roundDown(capacity * 0.5) : null;
-    add('investMonthly', '월 투자 시작 금액', invest, '무리 없는 월 적립 여력 × 50%', ['monthlyIncome', 'monthlyExpense', 'debtPayment']);
+    const pace = pacePercent(val(info, 'investPace'));
+    const share = pace != null ? pace : 30;
+    const invest = surplus != null ? roundDown((Math.max(0, surplus) * share) / 100) : null;
+    add(
+      'investMonthly',
+      '월 투자 시작 금액',
+      invest,
+      '월 여유자금 × ' + share + '%' + (pace != null ? ' (고객이 고른 투자 속도)' : ' (투자 속도를 아직 모름)'),
+      ['monthlyIncome', 'monthlyExpense', 'debtPayment', 'investPace']
+    );
+    m[m.length - 1].share = share;
+    m[m.length - 1].shareKnown = pace != null;
     let rec = null;
     if (pref != null) rec = pref;
     else if (capacity != null) rec = need != null ? Math.min(need, capacity) : capacity;
@@ -288,12 +338,13 @@
     }
     const uncertain = Object.keys(info.items).filter((k) => p.critical.concat(p.important).indexOf(k) !== -1 && (!known(info, k) || (info.items[k].source !== 'STATED' && info.items[k].source !== 'BANK')));
     const invest = purposeId === 'INVEST';
+    const accountLook = purposeId === 'EMERGENCY' || purposeId === 'ORIENT';
     return {
       purposeId: PURPOSES[purposeId] ? purposeId : 'GOAL_SAVING',
       purpose: p.label,
       tags: p.tags,
-      monthly: invest ? b.investMonthly.value : b.recommendedMonthly.value,
-      months: invest ? null : months,
+      monthly: invest ? b.investMonthly.value : accountLook ? null : b.recommendedMonthly.value,
+      months: invest || accountLook ? null : months,
       feasible: metrics.feasible,
       alternatives: alternatives,
       uncertain: uncertain,
@@ -315,12 +366,12 @@
       add('남겨 둘 비상자금', b.reserve, b.reserve.text, '');
       return figs;
     }
-    add('무리 없이 모을 수 있는 돈', b.capacity, '월 ' + b.capacity.text, '');
     if (purposeId === 'INVEST') {
       const low = b.emergencyMonths.value != null && b.emergencyMonths.value < SC.POLICY.emergencyMonths;
       add('바로 쓸 수 있는 예금', b.emergencyMonths, '생활비 ' + b.emergencyMonths.text + '치', '', low ? 'warning' : '');
       return figs;
     }
+    add('무리 없이 모을 수 있는 돈', b.capacity, '월 ' + b.capacity.text, '');
     const short = b.needMonthly.value != null && b.capacity.value != null ? b.needMonthly.value - b.capacity.value : null;
     add('목표까지 매달 필요한 돈', b.needMonthly, '월 ' + b.needMonthly.text, short > 0 ? '여유보다 매달 ' + man(short) + ' 더 필요해요' : '', short > 0 ? 'warning' : '');
     return figs;
@@ -330,7 +381,9 @@
     if (basis.monthly == null) return [];
     const b = metrics.byKey;
     if (basis.purposeId === 'INVEST') {
-      const inv = [{ label: '매달 투자할 돈', value: '월 ' + man(basis.monthly), note: '', tone: '' }];
+      const pace = b.investMonthly;
+      const note = pace && pace.share != null && b.surplus.value != null ? (pace.shareKnown ? paceName(pace.share) : '속도를 아직 몰라') + ' · 남는 ' + b.surplus.text + '의 ' + pace.share + '%' : '';
+      const inv = [{ label: '매달 투자할 돈', value: '월 ' + man(basis.monthly), note: note, tone: '' }];
       if (b.reserve.value != null) inv.push({ label: '예금으로 남길 돈', value: b.reserve.text, note: '', tone: '' });
       return inv;
     }
@@ -338,7 +391,7 @@
     if (basis.months) figs.push({ label: '모으는 기간', value: display('goalMonths', basis.months), note: '', tone: '' });
     if (b.expectedAmount.value != null) {
       const short = b.target.value != null ? b.target.value - b.expectedAmount.value : null;
-      figs.push({ label: '기간이 끝나면', value: '약 ' + man(b.expectedAmount.value), note: short > 0 ? '목표보다 ' + man(short) + ' 적어요 (이자 제외)' : '이자는 빼고 계산했어요', tone: short > 0 ? 'warning' : '' });
+      figs.push({ label: '기간이 끝나면', value: '약 ' + man(b.expectedAmount.value), note: short > 0 ? '목표보다 ' + man(short) + ' 적어요' : '', tone: short > 0 ? 'warning' : '' });
     }
     return figs;
   }
@@ -367,6 +420,7 @@
     known: known,
     val: val,
     display: display,
+    pacePercent: pacePercent,
     computeMetrics: computeMetrics,
     findGaps: findGaps,
     questionFor: questionFor,

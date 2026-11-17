@@ -65,16 +65,29 @@
     if (j.chat.length > 80) j.chat.shift();
   }
 
-  function loadMs() {
-    return 5000 * bank.getLatencyScale();
+  function scaleMs(ms) {
+    return ms * bank.getLatencyScale();
+  }
+
+  async function waitUserSlide(ep) {
+    const chat = S() && S().chat;
+    const last = chat && chat[chat.length - 1];
+    if (!last || last.role !== 'user') return true;
+    const left = scaleMs(1000) - (Date.now() - last.at);
+    if (left > 0) {
+      think(false);
+      await WSP.utils.sleep(left);
+      if (stale(ep)) return false;
+    }
+    return true;
   }
 
   async function sayAI(res, extra) {
     const ep = A().epoch();
     const text = res.output.message;
-    const wait = loadMs();
-    const thinkMs = wait * 0.6;
-    const easeMs = (wait - thinkMs) / 2;
+    if (!(await waitUserSlide(ep))) return false;
+    const thinkMs = scaleMs(1500);
+    const easeMs = scaleMs(1000);
     if (thinkMs > 0) {
       think(true);
       await WSP.utils.sleep(thinkMs);
@@ -257,7 +270,46 @@
     if (j.skipped.length) WSP.events.add('AI', '묻지 않은 질문: ' + j.skipped.map((s) => s.label + '(' + s.reason + ')').join(', '));
     if (stale(ep)) return;
     think(false);
+    if (!(await revealChecks(ep))) return;
     fsm().transition(j.evaluation.allMet ? 'NONE_MISSING' : 'MISSING', { unmet: j.evaluation.unmet });
+  }
+
+  /** 조건은 한꺼번에 체크하지 않고, 0.2~3초 사이에 각자 확인된 것처럼 보여 준다. */
+  function revealChecks(ep) {
+    const j = S();
+    if (!j || !j.evaluation) return Promise.resolve(false);
+    const ids = j.evaluation.conditions.map((c) => c.id);
+    if (!(bank.getLatencyScale() > 0)) {
+      j.checkPending = null;
+      j.checkDone = null;
+      return Promise.resolve(true);
+    }
+    j.checkPending = ids.slice();
+    j.checkDone = [];
+    A().refresh(SCREENS);
+    return Promise.all(
+      ids.map(
+        (id) =>
+          new Promise((resolve) => {
+            const ms = Math.round((200 + Math.random() * 2800) * bank.getLatencyScale());
+            setTimeout(() => {
+              const cur = S();
+              if (cur && !stale(ep) && cur.checkPending) {
+                cur.checkDone.push(id);
+                cur.checkFresh = id;
+                A().refresh(SCREENS);
+              }
+              resolve();
+            }, ms);
+          })
+      )
+    ).then(() => {
+      if (stale(ep) || !S()) return false;
+      j.checkPending = null;
+      j.checkDone = null;
+      j.checkFresh = null;
+      return true;
+    });
   }
 
   /** @returns {boolean} 고객 답변을 기다려야 하면 true */
@@ -528,11 +580,9 @@
       return;
     }
     const remain = ev.conditions.filter((x) => x.status !== 'MET').map((x) => x.label);
-    const doneName = ct ? SC.getTask(ct.taskId).label : '';
     let sentence = '';
     if (status === 'CANCELLED') sentence = '업무를 마치지 않고 닫으셨어요. 남은 조건은 ' + WSP.utils.josa(remain.join(', '), '이에요') + '.';
     else if (status === 'PARTIAL') sentence = '일부 단계만 저장돼서 아직 완료되지 않았어요. 남은 조건은 ' + WSP.utils.josa(remain.join(', '), '이에요') + '.';
-    else if (doneName) sentence = '은행 조회에서 ' + WSP.utils.josa(doneName, '이') + ' 끝났어요.' + (remain[0] ? ' 다음은 ' + WSP.utils.josa(remain[0], '이에요') + '.' : '');
     if (sentence) {
       const ai = await AI.join.afterRecheck('REMAINING', sentence);
       if (stale(ep)) return;
@@ -816,11 +866,9 @@
     'join-exit'() {
       return exit();
     },
-    'join-send'(d, el) {
-      const input = UI().currentEl().querySelector('#join-input');
-      const v = input ? input.value : '';
-      if (input) input.value = '';
-      return sendText(d.q || v);
+    'join-send'(d) {
+      if (!d.q) return;
+      return sendText(d.q);
     },
     'join-answer'(d) {
       return A().guard('join-answer', () => answer(d.key, d.value === 'true'));

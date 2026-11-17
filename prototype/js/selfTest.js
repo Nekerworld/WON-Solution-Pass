@@ -111,6 +111,17 @@
   const TESTS = [];
   const t = (name, fn) => TESTS.push({ name: name, fn: fn });
 
+  t('프롬프트 쿠키는 종목을 추천하지 않는다', () => {
+    fresh();
+    const lines = WSP.assetFlow.cookieLines(store.getState());
+    const banned = /종목|매수|매도|수익률|추천주|사세요/;
+    assert(lines.length >= 8, '문장 수 ' + lines.length);
+    lines.forEach((line) => {
+      assert(!banned.test(line), line);
+      assert(line.length <= 120, line.length + ' ' + line);
+    });
+  });
+
   t('조회 실패는 미충족이 아니라 UNKNOWN으로 판정', async () => {
     fresh((d) => (d.simulation.queryFailure = true));
     const ev = RE.evaluate(PID, await bank.checkConditions(PID));
@@ -266,13 +277,14 @@
     }
     assert(asked.indexOf('monthlyIncome') === -1 && asked.indexOf('monthlyExpense') === -1, '월급·지출을 다시 물음 ' + asked.join(','));
     assert(af().state === 'REVIEW' && a.proposal.level === 'FULL', '상태 ' + af().state + ' / ' + (a.proposal && a.proposal.level));
-    assert(a.proposal.basis.monthly === 490000, '월 투자 금액 ' + a.proposal.basis.monthly);
+    assert(asked[0] === 'investPace', '첫 질문 ' + asked.join(','));
+    assert(a.proposal.basis.monthly === 420000, '월 투자 금액 ' + a.proposal.basis.monthly);
     const prop = a.chat.filter((m) => m.kind === 'proposal').pop();
     assert(prop && /원금 손실/.test(prop.text), '투자 위험 안내 없음');
     await F.accept();
     const shared = WSP.app.session.customerContext;
     assert(shared && shared.goal === '해외주식 투자를 처음 시작해 보고 싶어요', '목표 전달 ' + (shared && shared.goal));
-    assert(shared.financialSummary && shared.financialSummary.monthly === 490000, '참고 금액 ' + (shared.financialSummary && shared.financialSummary.monthly));
+    assert(shared.financialSummary && shared.financialSummary.monthly === 420000, '참고 금액 ' + (shared.financialSummary && shared.financialSummary.monthly));
     F.nextAction('explore');
     assert(af().state === 'EXPLORE', '상태 ' + af().state);
     const ids = SC.PRODUCTS.map((p) => p.id);
@@ -407,10 +419,137 @@
     assert(!chat.some((m) => /반영했어요/.test(m.text)), '답변 확인 메시지가 남아 있음');
     const prop = chat.filter((m) => m.kind === 'proposal').pop();
     assert(prop && prop.figures && prop.figures.length >= 2, '제안 큰 숫자 없음');
-    assert(/실제와 다를 수 있어요/.test(prop.text), '불확실성 안내 없음: ' + prop.text);
+    assert(prop && !/실제와 다를 수 있어요/.test(prop.text), '같은 단서를 문장에 반복: ' + prop.text);
   });
 
-  t('모름·답변 거부는 재계산 없이 제안 가능 판단으로 가고, 최소 정보가 없으면 보류', async () => {
+  t('목표로 말한 결혼 자금을 예정 지출로 다시 묻지 않는다', async () => {
+    fresh();
+    const F = WSP.assetFlow;
+    F.start();
+    F.agree();
+    await F.setGoal('지금 예금 8482400원이면, 결혼 자금 3천만원을 모으는 데 얼마나 부족한가요?');
+    assert(WSP.app.session.asset.pendingQuestion === 'goalMonths', '질문 ' + WSP.app.session.asset.pendingQuestion);
+    await F.answerChip(24, '2년 안에');
+    assert(WSP.app.session.asset.pendingQuestion === 'plannedLumpSum', '다음 질문 ' + WSP.app.session.asset.pendingQuestion);
+    const asked = WSP.app.session.asset.chat.filter((m) => m.role === 'ai').pop();
+    assert(asked && /그 외에 또 나갈 목돈이 있나요/.test(asked.text), '질문: ' + (asked && asked.text));
+    assert(asked && !/결혼·이사·경조사처럼 목돈이 나갈/.test(asked.text), '같은 일을 다시 물음');
+  });
+
+  t('생활비 개월치는 모으는 기간이 아니고, 비상자금은 충분한지 답한다', async () => {
+    fresh();
+    const F = WSP.assetFlow;
+    F.start();
+    F.agree();
+    await F.setGoal('예금이 생활비 4개월치예요. 비상자금으로 충분한지 알고 싶어요.');
+    const a = WSP.app.session.asset;
+    assert(a.purpose === 'EMERGENCY', '목적 ' + a.purpose);
+    assert(a.info.items.goalMonths.value == null, '기간 ' + a.info.items.goalMonths.value);
+    assert(af().state === 'REVIEW', '상태 ' + af().state);
+    const prop = a.chat.filter((m) => m.kind === 'proposal').pop();
+    assert(prop && /충분/.test(prop.text) && !/4개월 동안/.test(prop.text), '제안: ' + (prop && prop.text));
+  });
+
+  t('월급과 지출 금액은 목표 금액이 아니다', async () => {
+    fresh();
+    const F = WSP.assetFlow;
+    F.start();
+    F.agree();
+    await F.setGoal('월급 350만원에서 지출 210만원을 빼고, 해외주식을 시작해도 부담 없을까요?');
+    const a = WSP.app.session.asset;
+    assert(a.purpose === 'INVEST', '목적 ' + a.purpose);
+    assert(a.info.items.goalAmount.value == null, '목표 ' + a.info.items.goalAmount.value);
+    assert(!a.chat.some((m) => /목표 금액은 350만원/.test(m.text)), '월급을 목표로 읽음');
+    assert(a.pendingQuestion === 'investPace', '질문 ' + a.pendingQuestion);
+    await F.answerChip('UNKNOWN', '잘 모르겠어요');
+    assert(a.pendingQuestion === 'investAssets', '모름 다음 질문 ' + a.pendingQuestion);
+    assert(a.info.declined.indexOf('investPace') !== -1, '투자 속도를 넘기지 않음');
+    await F.answerChip('UNKNOWN', '잘 모르겠어요');
+    assert(a.pendingQuestion === 'plannedLumpSum', '모름 다음 질문 ' + a.pendingQuestion);
+    assert(a.info.declined.indexOf('investAssets') !== -1, '증권 투자금을 넘기지 않음');
+  });
+
+  t('공격적 투자 속도는 남는 돈의 90%를 투자 금액으로 쓴다', async () => {
+    fresh();
+    const info = AA.createInfo(store.getState().finance.items);
+    const unknown = AA.computeMetrics(info);
+    assert(unknown.byKey.investMonthly.value === 420000, '미확인 ' + unknown.byKey.investMonthly.value);
+    assert(/아직 모름/.test(unknown.byKey.investMonthly.formula), '근거 ' + unknown.byKey.investMonthly.formula);
+    AA.setItem(info, 'investPace', 50, 'STATED', '보통');
+    assert(AA.computeMetrics(info).byKey.investMonthly.value === 700000, '보통');
+    AA.setItem(info, 'investPace', 90, 'STATED', '공격');
+    const agg = AA.computeMetrics(info);
+    assert(agg.byKey.investMonthly.value === 1260000, '공격 ' + agg.byKey.investMonthly.value);
+    assert(/90%/.test(agg.byKey.investMonthly.formula) && /고객이 고른/.test(agg.byKey.investMonthly.formula), '근거 ' + agg.byKey.investMonthly.formula);
+    const F = WSP.assetFlow;
+    F.start();
+    F.agree();
+    await F.setGoal('해외주식 투자를 처음 시작해 보고 싶어요');
+    const a = WSP.app.session.asset;
+    assert(a.pendingQuestion === 'investPace', '첫 질문 ' + a.pendingQuestion);
+    await F.answerChip(90, '공격적으로');
+    let n = 0;
+    while (af().state === 'ASKING' && n < 4) {
+      const q = AA.QUESTIONS[a.pendingQuestion];
+      await F.answerChip(String(q.options[0][1]), q.options[0][0]);
+      n += 1;
+    }
+    assert(a.proposal && a.proposal.basis.monthly === 1260000, '제안 ' + (a.proposal && a.proposal.basis.monthly));
+    const prop = a.chat.filter((m) => m.kind === 'proposal').pop();
+    const note = prop && prop.figures ? prop.figures.map((f) => f.note).join(' ') : '';
+    assert(/공격적/.test(note) && /90%/.test(note) && /140만원/.test(note), '카드 근거 ' + note);
+    assert(prop && /원금 손실/.test(prop.text), '투자 위험 안내 없음');
+  });
+
+  t('다시 분석은 투자 속도를 금액으로 곱하지 않는다', async () => {
+    fresh();
+    const info = AA.createInfo(store.getState().finance.items);
+    AA.setItem(info, 'investPace', 10000, 'STATED', '잘못된 정정');
+    const capped = AA.computeMetrics(info);
+    assert(capped.byKey.investMonthly.value === 1400000, '상한 ' + capped.byKey.investMonthly.value);
+    assert(capped.byKey.investMonthly.share === 100, '비율 ' + capped.byKey.investMonthly.share);
+    const F = WSP.assetFlow;
+    F.start();
+    F.agree();
+    await F.setGoal('해외주식 투자를 처음 시작해 보고 싶어요');
+    const a = WSP.app.session.asset;
+    await F.answerChip(90, '공격적으로');
+    let n = 0;
+    while (af().state === 'ASKING' && n < 4) {
+      const q = AA.QUESTIONS[a.pendingQuestion];
+      await F.answerChip(String(q.options[0][1]), q.options[0][0]);
+      n += 1;
+    }
+    await F.accept();
+    F.nextAction('recheck');
+    assert(af().state === 'RECONSULT', '상태 ' + af().state);
+    await F.resumeAnalysis();
+    assert(a.proposal.basis.monthly === 1260000, '그대로 다시 분석 ' + a.proposal.basis.monthly);
+    await F.accept();
+    F.nextAction('recheck');
+    AA.setItem(a.info, 'investPace', 10000, 'STATED', '잘못된 정정');
+    WSP.actions['asset-edit-pace']({ key: 'investPace', value: '90' });
+    assert(a.info.items.investPace.value === 90, '고친 값 ' + a.info.items.investPace.value);
+    await F.resumeAnalysis();
+    assert(a.proposal.basis.monthly === 1260000, '고친 뒤 ' + a.proposal.basis.monthly);
+    const again = a.chat.filter((m) => m.kind === 'proposal').pop();
+    const note = again && again.figures ? again.figures.map((f) => f.note).join(' ') : '';
+    assert(/90%/.test(note) && !/10000%/.test(note), '카드 ' + note);
+  });
+
+  t('계좌 정보만으로 어디부터는 목표 금액을 묻지 않는다', async () => {
+    fresh();
+    const F = WSP.assetFlow;
+    F.start();
+    F.agree();
+    await F.setGoal('계좌에 있는 정보만으로, 자산관리를 어디부터 보면 좋을까요?');
+    const a = WSP.app.session.asset;
+    assert(a.purpose === 'ORIENT', '목적 ' + a.purpose);
+    assert(af().state === 'REVIEW', '상태 ' + af().state);
+    assert(!a.chat.some((m) => /목표 금액이 어느 정도/.test(m.text)), '목표 금액을 물음');
+  });
+
+  t('잘 모르겠어요는 그 질문만 넘기고 재계산하지 않는다', async () => {
     fresh((d) => {
       d.finance.items.monthlyIncome = { value: null, source: 'UNKNOWN', basis: '' };
     });
@@ -422,9 +561,10 @@
     const before = af().history().length;
     await F.answerChip('UNKNOWN', '잘 모르겠어요');
     const after = af().history().slice(before).map((h) => h.to);
-    assert(after[0] === 'PROPOSABLE_CHECK', '다음 상태 ' + after[0]);
+    assert(after[0] === 'GAP_CHECK', '다음 상태 ' + after[0]);
     assert(after.indexOf('RECALC_ANSWER') === -1, '재계산을 거침');
-    assert(af().state === 'HOLD', '상태 ' + af().state);
+    assert(WSP.app.session.asset.pendingQuestion === 'goalAmount', '다음 질문 ' + WSP.app.session.asset.pendingQuestion);
+    assert(af().state === 'ASKING', '상태 ' + af().state);
   });
 
   t('AI 출력 검증기: 경로에 없는 업무·가입 실행·완료 단정을 거부', async () => {
@@ -508,6 +648,7 @@
       ['GAP_CHECK', 'ASK', 'ASKING'],
       ['GAP_CHECK', 'LIMIT_OR_STOP', 'PROPOSABLE_CHECK'],
       ['ASKING', 'ANSWERED', 'RECALC_ANSWER'],
+      ['ASKING', 'SKIP_ONE', 'GAP_CHECK'],
       ['ASKING', 'UNKNOWN_OR_REFUSED', 'PROPOSABLE_CHECK'],
       ['ASKING', 'STOP_REQUEST', 'PROPOSABLE_CHECK'],
       ['RECALC_ANSWER', 'RECALCULATED', 'INTERPRETING'],

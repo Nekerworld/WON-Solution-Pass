@@ -64,16 +64,30 @@
     return run;
   }
 
-  function loadMs() {
-    return 5000 * bank.getLatencyScale();
+  function scaleMs(ms) {
+    return ms * bank.getLatencyScale();
+  }
+
+  /** 사용자 말이 들어오는 동안에는 로딩을 켜지 않는다. */
+  async function waitUserSlide(ep) {
+    const chat = S() && S().chat;
+    const last = chat && chat[chat.length - 1];
+    if (!last || last.role !== 'user') return true;
+    const left = scaleMs(1000) - (Date.now() - last.at);
+    if (left > 0) {
+      think(false);
+      await WSP.utils.sleep(left);
+      if (stale(ep)) return false;
+    }
+    return true;
   }
 
   /** @returns {Promise<boolean>} 기다리는 동안 데모가 초기화됐으면 false */
   async function say(msg) {
     const ep = A().epoch();
-    const wait = loadMs();
-    const thinkMs = wait * 0.6;
-    const easeMs = (wait - thinkMs) / 2;
+    if (!(await waitUserSlide(ep))) return false;
+    const thinkMs = scaleMs(1500);
+    const easeMs = scaleMs(1000);
     if (thinkMs > 0) {
       pacing += 1;
       think(true);
@@ -153,17 +167,69 @@
     });
   }
 
+  const COOKIE_BANNED = /종목|매수|매도|수익률|추천주|사세요/;
+
+  function cookieLines(s) {
+    const lines = [
+      '해외주식 투자를 처음 시작해 보고 싶어요.',
+      '비상자금이 충분한지 알고 싶어요.',
+      '3년 안에 목돈을 모으려면 매달 얼마를 모아야 할까요?',
+      '계좌에 있는 정보만으로, 자산관리를 어디부터 보면 좋을까요?',
+    ];
+    const items = s && s.finance && s.finance.items;
+    const income = items && items.monthlyIncome;
+    const expense = items && items.monthlyExpense;
+    const liquid = items && items.liquidAssets;
+    if (income && income.value != null && expense && expense.value && liquid && liquid.value != null) {
+      const months = Math.round((liquid.value / expense.value) * 10) / 10;
+      lines.push('예금이 생활비 ' + months + '개월치예요. 비상자금으로 충분한지 알고 싶어요.');
+      lines.push('월급 ' + WSP.utils.formatMan(income.value) + '에서 지출 ' + WSP.utils.formatMan(expense.value) + '을 빼고, 해외주식을 시작해도 부담 없을까요?');
+      lines.push('지금 예금 ' + WSP.utils.formatWon(liquid.value) + '이면, 결혼 자금 3천만원을 모으는 데 얼마나 부족한가요?');
+      if (!(s.facts && s.facts.hasFxAccount === true)) lines.push('해외주식 계좌는 아직 없어요. 매달 얼마부터 보면 좋을지 알고 싶어요.');
+    }
+    return lines.filter((t) => !COOKIE_BANNED.test(t) && t.length <= 120);
+  }
+
+  function pickCookie(s) {
+    const lines = cookieLines(s);
+    if (!lines.length) return '';
+    return lines[Math.floor(Math.random() * lines.length)];
+  }
+
+  function freshConsult() {
+    const st = fsm().state;
+    return st === 'IDLE' || st === 'CLOSED' || st === 'TO_JOIN';
+  }
+
+  function openConsult() {
+    const st = fsm().state;
+    UI().navigate(st === 'CONSENT' ? 'asset-consent' : st === 'EXPLORE' ? 'explore' : st === 'HANDOFF' ? 'support' : 'asset', st === 'HANDOFF' ? { track: 'asset' } : {});
+  }
+
+  /** 쿠키 문장으로 상담을 연다. 목표를 다시 묻는 인사는 하지 않는다. */
+  function sendCookie(text) {
+    const t = String(text || '').trim();
+    if (!t || COOKIE_BANNED.test(t)) return;
+    if (!freshConsult()) return openConsult();
+    if (!start()) return;
+    if (!fsm().can('AGREE')) return;
+    fsm().transition('AGREE');
+    if (S()) S().thinking = true;
+    return enqueue(async () => {
+      sayUser(t);
+      await UI().navigate('asset', {}, { replace: true });
+      await applyGoal(t);
+    });
+  }
+
   async function setGoal(text) {
     return enqueue(() => setGoalNow(text));
   }
 
-  async function setGoalNow(text) {
+  async function applyGoal(t) {
     const a = S();
-    const t = String(text || '').trim();
-    if (!a || !t || fsm().state !== 'GOAL') return;
-    sayUser(t);
+    if (!a || fsm().state !== 'GOAL') return;
     const ep = A().epoch();
-    think(true);
     const ai = await AI.asset.goal(t);
     if (stale(ep)) return;
     a.goalText = t;
@@ -173,6 +239,14 @@
     if (ai.output.message && !(await sayAI(ai))) return;
     fsm().transition('GOAL_SET', { purpose: a.purpose });
     await advance();
+  }
+
+  async function setGoalNow(text) {
+    const a = S();
+    const t = String(text || '').trim();
+    if (!a || !t || fsm().state !== 'GOAL') return;
+    sayUser(t);
+    await applyGoal(t);
   }
 
   /* ---------------- 자동 진행 ---------------- */
@@ -210,6 +284,7 @@
     const a = S();
     const f = fsm();
     if (st === 'COLLECTING') {
+      if (!(await waitUserSlide(ep))) return;
       think(true);
       const r = await bank.getFinancialSnapshot();
       if (stale(ep)) return;
@@ -235,7 +310,6 @@
       if (a.chat.some((m) => m.kind === 'interpret')) {
         f.transition('INTERPRETED');
       } else {
-        think(true);
         const ai = await AI.asset.interpret(a.metrics);
         if (stale(ep)) return;
         if (!(await sayAI(ai, { kind: 'interpret', figures: AA.interpretFigures(a.metrics, a.purpose, a.info) }))) return;
@@ -246,8 +320,7 @@
       if (!a.gaps.length) return void f.transition('NO_GAP');
       if (AA.canAsk(a, a.gaps)) {
         const gap = a.gaps.find((g) => !!AA.questionFor(g));
-        const q = AA.questionFor(gap);
-        think(true);
+        const q = posedQuestion(AA.questionFor(gap), a.goalText);
         const ai = await AI.asset.ask(q, gap);
         if (stale(ep)) return;
         if (!(await sayAI(ai, { kind: 'question', key: q.key, why: q.why, level: gap.level }))) return;
@@ -271,7 +344,6 @@
     } else if (st === 'PROPOSED_FULL' || st === 'PROPOSED_LIMITED') {
       const level = st === 'PROPOSED_FULL' ? 'FULL' : 'LIMITED';
       const basis = AA.proposalBasis(a.info, a.purpose, a.metrics);
-      think(true);
       const ai = await AI.asset.propose(basis, level, a.metrics);
       if (stale(ep)) return;
       if (!(await sayAI(ai, { kind: 'proposal', figures: AA.proposalFigures(basis, a.metrics) }))) return;
@@ -279,6 +351,17 @@
       syncContext();
       f.transition('SHOWN', { level: level });
     }
+  }
+
+  /** 목표로 이미 말한 경조사·결혼·이사를, 아직 모르는 지출처럼 다시 묻지 않는다. */
+  function posedQuestion(q, goalText) {
+    if (!q || q.key !== 'plannedLumpSum') return q;
+    const named = String(goalText || '').match(/결혼|이사|경조사/);
+    if (!named) return q;
+    return Object.assign({}, q, {
+      text: '그 외에 또 나갈 목돈이 있나요?',
+      why: '',
+    });
   }
 
   function collect(data) {
@@ -339,7 +422,8 @@
     if (hold && q) {
       AA.markDeclined(a.info, q.key, hold.reason);
       a.pendingQuestion = null;
-      f.transition('UNKNOWN_OR_REFUSED', { key: q.key, kind: hold.reason });
+      if (hold.reason === 'UNKNOWN') f.transition('SKIP_ONE', { key: q.key });
+      else f.transition('UNKNOWN_OR_REFUSED', { key: q.key, kind: hold.reason });
       return advance();
     }
     const sets = out.actions.filter((x) => x.type === 'SET_INFO');
@@ -380,6 +464,7 @@
   async function acceptNow() {
     const a = S();
     if (fsm().state !== 'REVIEW') return;
+    a.pendingAccept = true;
     sayUser('이 방향으로 할게요');
     a.handoffTerms = {
       purpose: AA.PURPOSES[a.purpose].label,
@@ -389,8 +474,14 @@
       goalText: a.goalText,
     };
     syncContext();
+    const said = await sayBot('좋아요. 다음에 할 일을 골라 주세요.');
+    a.pendingAccept = false;
+    if (!said || fsm().state !== 'REVIEW') {
+      A().refresh(SCREENS);
+      return;
+    }
     fsm().transition('ACCEPT');
-    await sayBot('좋아요. 다음에 할 일을 골라 주세요.');
+    A().refresh(SCREENS);
   }
 
   async function modifyText(text) {
@@ -579,16 +670,53 @@
     end: end,
     newCase: newCase,
     handoffContext: handoffContext,
+    cookieLines: cookieLines,
+    pickCookie: pickCookie,
   };
 
   WSP.registerActions({
     'asset-start'() {
-      const st = fsm().state;
-      if (st === 'IDLE' || st === 'CLOSED' || st === 'TO_JOIN') {
+      if (freshConsult()) {
         if (start()) UI().navigate('asset-consent');
         return;
       }
-      UI().navigate(st === 'CONSENT' ? 'asset-consent' : st === 'EXPLORE' ? 'explore' : st === 'HANDOFF' ? 'support' : 'asset', st === 'HANDOFF' ? { track: 'asset' } : {});
+      openConsult();
+    },
+    'prompt-cookie'(_d, el) {
+      const root = el && el.closest('.fortune');
+      if (!root) return;
+      const bubble = root.querySelector('.fortune__bubble');
+      if (root._fortuneOnEnd && bubble) {
+        bubble.removeEventListener('transitionend', root._fortuneOnEnd);
+        root._fortuneOnEnd = null;
+      }
+      if (root.classList.contains('is-open')) {
+        root.classList.remove('is-open', 'is-ready');
+        return;
+      }
+      root.classList.remove('is-ready');
+      root.classList.add('is-open');
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        root.classList.add('is-ready');
+        return;
+      }
+      if (!bubble) return;
+      const onEnd = (ev) => {
+        if (ev.target !== bubble || ev.propertyName !== 'max-width') return;
+        bubble.removeEventListener('transitionend', onEnd);
+        if (root._fortuneOnEnd === onEnd) root._fortuneOnEnd = null;
+        if (root.classList.contains('is-open')) root.classList.add('is-ready');
+      };
+      root._fortuneOnEnd = onEnd;
+      bubble.addEventListener('transitionend', onEnd);
+    },
+    'prompt-cookie-send'(_d, el) {
+      const root = el && el.closest('.fortune');
+      if (!root || !root.classList.contains('is-ready')) return;
+      const text = root.querySelector('.fortune__text');
+      const line = text ? text.textContent.trim() : '';
+      if (!freshConsult()) return openConsult();
+      return sendCookie(line);
     },
     'asset-agree'() {
       agree();
@@ -600,10 +728,8 @@
       UI().navigate('home', {}, { resetHistory: true, back: true });
     },
     'asset-send'(d) {
-      const input = UI().currentEl().querySelector('#asset-input');
-      const v = d.q || (input ? input.value : '');
-      if (input) input.value = '';
-      return A().guard('asset-send', () => answerText(v));
+      if (!d.q) return;
+      return A().guard('asset-send', () => answerText(d.q));
     },
     'asset-chip'(d) {
       return A().guard('asset-send', () => answerChip(d.value, d.label));
@@ -625,12 +751,26 @@
       if (!a || !a.info) return;
       const key = d.key;
       const it = a.info.items[key];
-      const isMonths = AA.ITEMS[key].kind === 'months';
+      const kind = AA.ITEMS[key].kind;
+      const now = UI().esc(it.value == null ? '입력 전' : AA.display(key, it.value));
+      if (kind === 'pace') {
+        const q = AA.QUESTIONS.investPace;
+        UI().openSheet(
+          '<h3 class="sheet__title">투자 속도 고치기</h3><p class="sheet__desc">지금 ' +
+            now +
+            '</p><div class="chip-row">' +
+            q.options.map((o) => '<button class="chip chip--lg" data-action="asset-edit-pace" data-key="' + key + '" data-value="' + o[1] + '">' + UI().esc(o[0]) + '</button>').join('') +
+            '</div>',
+          { dismissible: true }
+        );
+        return;
+      }
+      const isMonths = kind === 'months';
       const sh = UI().openSheet(
         '<h3 class="sheet__title">' +
           UI().esc(AA.ITEMS[key].label) +
           ' 고치기</h3><p class="sheet__desc">지금 ' +
-          UI().esc(it.value == null ? '입력 전' : AA.display(key, it.value)) +
+          now +
           '</p><label class="field"><span class="field__label">' +
           (isMonths ? '개월 수' : '금액(만원)') +
           '</span><input class="text-input" id="asset-edit-value" inputmode="numeric" value="' +
@@ -640,8 +780,14 @@
           '">저장</button></div>',
         { dismissible: true }
       );
-      const inp = sh.querySelector('input');
+      const inp = sh && sh.querySelector('input');
       if (inp) setTimeout(() => inp.focus(), 250);
+    },
+    'asset-edit-pace'(d) {
+      const v = AA.pacePercent(d.value);
+      if (v == null) return;
+      UI().closeSheet();
+      editItem(d.key, v);
     },
     'asset-edit-save'(d) {
       const sh = UI().getSheet();
@@ -651,8 +797,9 @@
         UI().toast('숫자로 입력해 주세요.', 'warning');
         return;
       }
+      const kind = AA.ITEMS[d.key].kind;
       UI().closeSheet();
-      editItem(d.key, AA.ITEMS[d.key].kind === 'months' ? v : v * 10000);
+      editItem(d.key, kind === 'months' ? v : kind === 'pace' ? AA.pacePercent(v) : v * 10000);
     },
     'asset-select-product'(d) {
       selectProduct(d.product);

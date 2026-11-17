@@ -2163,6 +2163,11 @@
   height: 21px;
 }
 
+.chat-input__send:disabled {
+  color: #c5c8ce;
+  cursor: default;
+}
+
 /* ---------- Skeleton ---------- */
 
 .skeleton {
@@ -3765,6 +3770,12 @@
   position: relative;
 }
 
+.ck__row.is-loading .ck__tick {
+  border-color: #e4e9f0;
+  border-top-color: var(--won-blue);
+  animation: spin 0.7s linear infinite;
+}
+
 .ck__row.is-met .ck__tick {
   border-color: var(--won-blue);
   background: var(--won-blue);
@@ -4201,6 +4212,30 @@ button.opt:hover {
   50% {
     box-shadow: 0 0 0 6px rgba(36, 136, 243, 0.18);
   }
+}
+
+.tm-done {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  min-height: 168px;
+  padding: 28px 0 8px;
+}
+
+.tm-done__mark {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: var(--success);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  animation: pop 0.35s var(--ease);
+}
+
+.tm-done__mark svg {
+  width: 46px;
+  height: 46px;
 }
 
 .tm-result {

@@ -1746,6 +1746,93 @@
   color: #474c50;
 }
 
+/* ---------- 프롬프트 말풍선 ---------- */
+
+.fortune {
+  position: absolute;
+  right: 12px;
+  bottom: 96px;
+  z-index: 6;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+}
+
+.fortune.is-open {
+  width: calc(100% - 24px);
+}
+
+.fortune__bubble {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 200px;
+  margin: 0;
+  padding: 10px 14px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--text);
+  box-shadow: var(--shadow-card);
+  text-align: left;
+  transition: max-width 0.32s var(--ease);
+}
+
+.fortune.is-open .fortune__bubble {
+  flex: 1 1 auto;
+  max-width: calc(100% - 96px);
+}
+
+.fortune__text {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.fortune.is-open .fortune__text {
+  white-space: normal;
+}
+
+.fortune__send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0;
+  height: 36px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  border-radius: 999px;
+  background: #1f6feb;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fortune.is-ready .fortune__send {
+  width: 88px;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.32s var(--ease), width 0.32s var(--ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fortune__bubble,
+  .fortune.is-ready .fortune__send {
+    transition: none;
+  }
+}
+
 .chat-input__plus svg {
   width: 22px;
   height: 22px;
