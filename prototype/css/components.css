@@ -3592,6 +3592,7 @@
   font-size: 13.5px;
   color: var(--text-2);
   line-height: 1.5;
+  white-space: pre-line;
 }
 
 .fig.is-warning .fig__note {
