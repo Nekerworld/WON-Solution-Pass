@@ -183,8 +183,8 @@
     if (income && income.value != null && expense && expense.value && liquid && liquid.value != null) {
       const months = Math.round((liquid.value / expense.value) * 10) / 10;
       lines.push('예금이 생활비 ' + months + '개월치예요. 비상자금으로 충분한지 알고 싶어요.');
-      lines.push('월급 ' + WSP.utils.formatMan(income.value) + '에서 지출 ' + WSP.utils.formatMan(expense.value) + '을 빼고, 해외주식을 시작해도 부담 없을까요?');
-      lines.push('지금 예금 ' + WSP.utils.formatWon(liquid.value) + '이면, 결혼 자금 3천만원을 모으는 데 얼마나 부족한가요?');
+      lines.push('해외주식을 시작해도 부담 없을까요?');
+      lines.push('지금 예금 ' + WSP.utils.formatMan(Math.round(liquid.value / 10000) * 10000) + '이면, 결혼 자금 3천만원을 모으는 데 얼마나 부족한가요?');
       if (!(s.facts && s.facts.hasFxAccount === true)) lines.push('해외주식 계좌는 아직 없어요. 매달 얼마부터 보면 좋을지 알고 싶어요.');
     }
     return lines.filter((t) => !COOKIE_BANNED.test(t) && t.length <= 120);
@@ -194,6 +194,56 @@
     const lines = cookieLines(s);
     if (!lines.length) return '';
     return lines[Math.floor(Math.random() * lines.length)];
+  }
+
+  /** 마지막 줄에 맺음말만 남지 않게, 문장 부호 뒤에서 줄을 나눈다. */
+  function relaxCookieWrap(el, bubble) {
+    const raw = el.textContent.replace(/\s+/g, ' ').trim();
+    if (!raw || !bubble) return;
+    el.textContent = raw;
+    const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const cut = Math.max(raw.lastIndexOf('. '), raw.lastIndexOf('? '), raw.lastIndexOf(', '));
+    if (cut >= 8 && raw.length - (cut + 2) >= 6) {
+      el.innerHTML = esc(raw.slice(0, cut + 2)) + '<span class="fortune__break">' + esc(raw.slice(cut + 2)) + '</span>';
+    }
+    const lines = cookieLineWidths(el);
+    if (lines.length < 2) return;
+    const widest = Math.max.apply(null, lines);
+    if (lines[lines.length - 1] >= widest * 0.4) return;
+    const host = el.querySelector('.fortune__break') || el;
+    const source = host.textContent.replace(/\s+/g, ' ').trim();
+    const parts = source.split(' ');
+    if (parts.length < 2) return;
+    const tail = parts.slice(-2).join(' ');
+    const head = parts.slice(0, -2).join(' ');
+    const html = (head ? esc(head) + ' ' : '') + '<span class="fortune__keep">' + esc(tail) + '</span>';
+    const prev = host.innerHTML;
+    host.innerHTML = html;
+    const keep = host.querySelector('.fortune__keep');
+    const pad = parseFloat(getComputedStyle(bubble).paddingLeft) + parseFloat(getComputedStyle(bubble).paddingRight);
+    if (keep && keep.offsetWidth > bubble.clientWidth - pad + 1) host.innerHTML = prev;
+  }
+
+  function cookieLineWidths(el) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const rects = range.getClientRects();
+    const lines = [];
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      if (r.width < 1) continue;
+      const last = lines[lines.length - 1];
+      if (!last || Math.abs(r.top - last.top) > 2) lines.push({ top: r.top, width: r.width });
+      else last.width = Math.max(last.width, r.width);
+    }
+    return lines.map((line) => line.width);
+  }
+  function nextCookie(s, current) {
+    const lines = cookieLines(s);
+    if (!lines.length) return '';
+    const rest = lines.filter((t) => t !== current);
+    const pool = rest.length ? rest : lines;
+    return pool[Math.floor(Math.random() * pool.length)];
   }
 
   function freshConsult() {
@@ -508,7 +558,7 @@
     sayUser(alt.label);
     const keys = Object.keys(alt.apply);
     if (!keys.length) {
-      await sayBot('비상자금을 먼저 채우는 방향은 상담사와 함께 구체적으로 정하는 걸 권해요. 이 방향으로 정한 뒤 상담 연결을 고를 수 있어요.');
+      await sayBot('비상자금부터 채우는 건 상담 연결에서 이어서 정하면 돼요.');
       return;
     }
     keys.forEach((k) => AA.setItem(a.info, k, alt.apply[k], 'STATED', '조정안 선택: ' + alt.label));
@@ -605,7 +655,7 @@
       f.transition('EXIT');
     } else return;
     A().refresh(SCREENS);
-    if (a) sayBot('상담을 마쳤어요. 상품 가입이나 이체 같은 변경은 하지 않았어요.');
+    if (a) sayBot('상담을 마쳤어요.');
   }
 
   async function exit() {
@@ -686,29 +736,109 @@
       const root = el && el.closest('.fortune');
       if (!root) return;
       const bubble = root.querySelector('.fortune__bubble');
-      if (root._fortuneOnEnd && bubble) {
-        bubble.removeEventListener('transitionend', root._fortuneOnEnd);
+      const text = root.querySelector('.fortune__text');
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const clearBox = () => {
+        if (!bubble) return;
+        bubble.style.width = '';
+        bubble.style.height = '';
+        bubble.style.maxWidth = '';
+        bubble.style.clipPath = '';
+      };
+      const stop = () => {
+        if (root._fortuneOnEnd && bubble) bubble.removeEventListener('transitionend', root._fortuneOnEnd);
+        if (root._fortuneTextEnd && text) text.removeEventListener('transitionend', root._fortuneTextEnd);
         root._fortuneOnEnd = null;
-      }
+        root._fortuneTextEnd = null;
+        clearTimeout(root._fortuneTimer);
+        clearTimeout(root._fortuneTextTimer);
+      };
+      stop();
       if (root.classList.contains('is-open')) {
-        root.classList.remove('is-open', 'is-ready');
+        root.classList.remove('is-ready', 'is-text');
+        root.classList.add('is-closing');
+        const finish = () => {
+          root.classList.remove('is-open', 'is-text', 'is-closing');
+          clearBox();
+        };
+        if (reduced || !bubble) {
+          finish();
+          return;
+        }
+        const top = Math.max(0, bubble.offsetHeight - 40);
+        const left = Math.max(0, bubble.offsetWidth - 40);
+        bubble.style.clipPath = 'inset(' + top + 'px 0px 0px ' + left + 'px round 20px)';
+        const started = Date.now();
+        const done = (ev) => {
+          if (ev.target !== bubble || ev.propertyName !== 'clip-path') return;
+          if (Date.now() - started < 400) return;
+          bubble.removeEventListener('transitionend', done);
+          if (root._fortuneOnEnd === done) root._fortuneOnEnd = null;
+          clearTimeout(root._fortuneTimer);
+          finish();
+        };
+        root._fortuneOnEnd = done;
+        bubble.addEventListener('transitionend', done);
+        root._fortuneTimer = setTimeout(finish, 560);
         return;
       }
-      root.classList.remove('is-ready');
-      root.classList.add('is-open');
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      root.classList.remove('is-text', 'is-ready', 'is-closing');
+      clearBox();
+      if (text) text.textContent = nextCookie(WSP.store.getState(), text.textContent.trim());
+      if (reduced || !bubble) {
+        root.classList.add('is-open', 'is-text', 'is-ready');
+        if (text) relaxCookieWrap(text, bubble);
+        return;
+      }
+      root.classList.add('is-open', 'is-measure');
+      if (text) relaxCookieWrap(text, bubble);
+      const targetW = bubble.offsetWidth;
+      const targetH = bubble.offsetHeight;
+      bubble.style.width = targetW + 'px';
+      bubble.style.height = targetH + 'px';
+      bubble.style.maxWidth = targetW + 'px';
+      const clipTop = Math.max(0, targetH - 40);
+      const clipLeft = Math.max(0, targetW - 40);
+      bubble.style.clipPath = 'inset(' + clipTop + 'px 0px 0px ' + clipLeft + 'px round 20px)';
+      void bubble.offsetWidth;
+      root.classList.remove('is-measure');
+      const showButton = () => {
+        if (!root.classList.contains('is-open') || root.classList.contains('is-ready')) return;
         root.classList.add('is-ready');
-        return;
-      }
-      if (!bubble) return;
+      };
+      const showText = () => {
+        if (!root.classList.contains('is-open') || root.classList.contains('is-text')) return;
+        root.classList.add('is-text');
+        if (!text) {
+          showButton();
+          return;
+        }
+        const onText = (ev) => {
+          if (ev.target !== text || ev.propertyName !== 'opacity') return;
+          text.removeEventListener('transitionend', onText);
+          if (root._fortuneTextEnd === onText) root._fortuneTextEnd = null;
+          clearTimeout(root._fortuneTextTimer);
+          showButton();
+        };
+        root._fortuneTextEnd = onText;
+        text.addEventListener('transitionend', onText);
+        root._fortuneTextTimer = setTimeout(showButton, 400);
+      };
       const onEnd = (ev) => {
-        if (ev.target !== bubble || ev.propertyName !== 'max-width') return;
+        if (ev.target !== bubble || ev.propertyName !== 'clip-path') return;
         bubble.removeEventListener('transitionend', onEnd);
         if (root._fortuneOnEnd === onEnd) root._fortuneOnEnd = null;
-        if (root.classList.contains('is-open')) root.classList.add('is-ready');
+        clearTimeout(root._fortuneTimer);
+        showText();
       };
       root._fortuneOnEnd = onEnd;
       bubble.addEventListener('transitionend', onEnd);
+      root._fortuneTimer = setTimeout(showText, 560);
+      requestAnimationFrame(() => {
+        if (!root.classList.contains('is-open')) return;
+        bubble.style.clipPath = 'inset(0px round 16px)';
+        showText();
+      });
     },
     'prompt-cookie-send'(_d, el) {
       const root = el && el.closest('.fortune');

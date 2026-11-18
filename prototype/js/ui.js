@@ -166,9 +166,8 @@
       BOT_FACE +
       '</span><div class="msg__card' +
       (m.tone === 'warning' ? ' is-warning' : '') +
-      '"><div class="msg__text">' +
-      esc(m.text).replace(/\n/g, '<br>') +
-      '</div>' +
+      '">' +
+      (m.text ? '<div class="msg__text">' + esc(m.text).replace(/\n/g, '<br>') + '</div>' : '') +
       figures(m.figures) +
       '</div>' +
       clock(m.at) +

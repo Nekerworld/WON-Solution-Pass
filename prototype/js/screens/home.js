@@ -169,7 +169,9 @@
         : '';
 
       const svcItem = (action, icon, tone, title) =>
-        '<button class="w-svc__item" data-action="' +
+        '<button class="w-svc__item' +
+        (action === 'asset-start' ? ' is-lead' : '') +
+        '" data-action="' +
         action +
         '"><span class="w-svc__icon is-' +
         tone +
@@ -229,7 +231,9 @@
         '</div>' +
         '</div>' +
         UI.bottomNav('home') +
-        '<div class="fortune"><button class="fortune__bubble" type="button" data-action="prompt-cookie"><span class="fortune__text">' +
+        '<div class="fortune"><button class="fortune__bubble" type="button" data-action="prompt-cookie" aria-label="추천 질문">' +
+        '<span class="fortune__cookie" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6.5 17.2c.3-6.4 5.2-11.2 10.6-11.2 2.5 0 3.8 1.7 3.4 3.4-.3 1.2-1.2 1.9-2.1 2.1 4.1.8 7.8 4 7.8 7.8 0 4.8-4.6 8-9.6 8-5.6 0-10.5-3.8-10.1-10.1z" fill="#f0c36a"/><path d="M8 18.2c1.8-5 5.6-8.4 10-8.8" fill="none" stroke="#d89a3c" stroke-width="1.2" stroke-linecap="round"/><path d="M18.6 15.4h8.4c.5 0 .8.4.7.8l-.7 2.4c-.1.4-.4.6-.8.6h-6.8c-.5 0-.9-.5-.7-1l.6-2.4c.1-.2.3-.4.6-.4z" fill="#fffaf0"/><path d="M20.6 16.8h5.2M20.2 18h4" stroke="#e4d2ae" stroke-width=".7" stroke-linecap="round"/></svg></span>' +
+        '<span class="fortune__dot" aria-hidden="true"></span><span class="fortune__text">' +
         esc(cookieLine) +
         '</span></button><button class="fortune__send" type="button" data-action="prompt-cookie-send">물어보기</button></div>'
       );

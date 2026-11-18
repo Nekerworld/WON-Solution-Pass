@@ -384,7 +384,15 @@
       const pace = b.investMonthly;
       const note = pace && pace.share != null && b.surplus.value != null ? (pace.shareKnown ? paceName(pace.share) : '속도를 아직 몰라') + ' · 남는 ' + b.surplus.text + '의 ' + pace.share + '%' : '';
       const inv = [{ label: '매달 투자할 돈', value: '월 ' + man(basis.monthly), note: note, tone: '' }];
-      if (b.reserve.value != null) inv.push({ label: '예금으로 남길 돈', value: b.reserve.text, note: '', tone: '' });
+      if (b.reserve.value != null) {
+        const months = SC.POLICY.emergencyMonths;
+        inv.push({
+          label: '예금으로 남길 돈',
+          value: b.reserve.text,
+          note: months + '개월치 지출이에요.\n최소 ' + months + '개월치의 예금은 유지하시는걸 추천해요.',
+          tone: '',
+        });
+      }
       return inv;
     }
     const figs = [{ label: '매달 모을 돈', value: '월 ' + man(basis.monthly), note: '', tone: '' }];

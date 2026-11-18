@@ -35,7 +35,7 @@
 
   const FALLBACK = Object.freeze({
     intent: 'FALLBACK',
-    message: '제가 확실하게 판단하지 못했어요. 아래 선택지에서 직접 골라 주세요.',
+    message: '아래 선택지에서 골라 주세요.',
     actions: [{ type: 'EXPLAIN', text: '기본 선택지 표시' }],
   });
 
@@ -405,8 +405,8 @@
         else if (held >= needMonths) text = '예금이 생활비 ' + held + '개월치예요. 기준인 ' + needMonths + '개월치보다 많아서, 비상자금은 충분한 편이에요.';
         else text = '예금이 생활비 ' + held + '개월치예요. 기준은 ' + needMonths + '개월치라 아직 부족해요.';
       } else if (basis.purposeId === 'ORIENT') {
-        text = '계좌에 있는 것만 보면, 예금은 생활비 ' + (held == null ? '확인 전' : held + '개월치') + '로 비상자금 기준 ' + needMonths + '개월치보다 ' + (held != null && held >= needMonths ? '많아요.' : '적어요.');
-        if (b.surplus.value != null) text += ' 매달 ' + b.surplus.text + '이 남아요. 목돈을 모을지, 해외주식을 볼지는 그다음에 고르면 돼요.';
+        if (held == null) text = '비상자금 기준은 ' + needMonths + '개월치예요.';
+        else text = '비상자금 기준은 ' + needMonths + '개월치예요. 지금은 그보다 ' + (held >= needMonths ? '많아요.' : '적어요.');
       } else if (basis.monthly == null) text = '지금 정보로는 월 적립액을 계산하기 어려워요.';
       else if (basis.purposeId === 'INVEST') text = '투자는 원금 손실이 날 수 있어요.';
       else text = '';
