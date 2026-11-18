@@ -4,7 +4,7 @@
  * - 트랙별 유한 상태머신 정의(FSM_DEFS)와 생성기(createFSM)
  *   전이표에 없는 전이는 거부한다. 각 간선에는 출처(src)를 기록한다.
  *   D: 합의 워크플로우(Group 1.png)에 있는 화살표
- *   P1~P8: 계획 0-2절에서 제안한 보완 전이
+ *   P1~P9: 계획 0-2절에서 제안한 보완 전이 (P9: 목돈 채팅 첫 질문의 해외주식 칩 → 계좌 개설 질문)
  *   S: 안전 장치(중복 실행 방지, 결과 조회 등) 전이
  * - 동작 등록소(WSP.actions): 각 모듈이 data-action 처리기를 등록한다.
  */
@@ -281,13 +281,20 @@
         ['DEBT_CHECK', 'SENT', 'PROFILING', 'D'],
         ['PROFILING', 'SENT', 'LOSS', 'D'],
         ['LOSS', 'SENT', 'RECOMMEND', 'D'],
+        ['LOSS', 'GAP', 'SHORTFALL', 'D'],
+        ['SHORTFALL', 'SENT', 'RECOMMEND', 'D'],
+        /* 성향을 이미 답한 뒤 목표를 바꿔 다시 판단하면, 성향은 다시 묻지 않고 부족 확인이나 추천으로 간다 */
+        ['SHORTFALL', 'ADJUST', 'DEBT_CHECK', 'D'],
+        ['DEBT_CHECK', 'PROFILED', 'RECOMMEND', 'D'],
+        ['DEBT_CHECK', 'GAP', 'SHORTFALL', 'D'],
         ['RECOMMEND', 'OVERSEAS', 'NO_ACCOUNT', 'D'],
         ['RECOMMEND', 'OTHER', 'CLOSED', 'D'],
+        ['INTRO', 'OVERSEAS', 'NO_ACCOUNT', 'P9'],
         ['NO_ACCOUNT', 'OPEN', 'TO_JOIN', 'D'],
         ['NO_ACCOUNT', 'LATER', 'CLOSED', 'D'],
         ['TO_JOIN', 'NEW_CASE', 'IDLE', 'S'],
         ['CLOSED', 'NEW_CASE', 'IDLE', 'S'],
-      ].concat(EXIT_P8(['INTRO', 'ANALYZING', 'GOAL', 'DEBT_CHECK', 'SPEND_PLAN', 'PROFILING', 'LOSS', 'RECOMMEND', 'NO_ACCOUNT'], 'CLOSED')),
+      ].concat(EXIT_P8(['INTRO', 'ANALYZING', 'GOAL', 'DEBT_CHECK', 'SPEND_PLAN', 'PROFILING', 'LOSS', 'SHORTFALL', 'RECOMMEND', 'NO_ACCOUNT'], 'CLOSED')),
     },
   });
 

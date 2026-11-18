@@ -5389,21 +5389,6 @@ button.opt:hover {
   animation: an-in 0.45s ease forwards;
 }
 
-.approve-stamp {
-  width: 72px;
-  height: 72px;
-  margin: 12px auto 0;
-  border: 3px solid #d23b3b;
-  color: #d23b3b;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  transform: rotate(-12deg);
-  animation: pop 0.45s ease both;
-}
-
 @keyframes blink {
   50% { opacity: 0; }
 }
@@ -5730,4 +5715,277 @@ button.opt:hover {
 .chat-input__field:has(textarea) .type-caret {
   align-self: flex-end;
   margin-bottom: 15px;
+}
+
+/* 해외주식 계좌 개설: 승인 대기·완료 순서 표시 */
+.approve-tl:has(.has-mark) {
+  width: max-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.approve-tl__item.has-mark {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.approve-tl__item.has-mark::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1fa463;
+}
+
+.approve-tl__item.is-wait {
+  color: var(--text-3);
+}
+
+.approve-tl__item.is-wait::before {
+  background: #b7c2d0;
+  animation: blink 1s steps(1) infinite;
+}
+
+/* 홈: 해외주식 계좌 개설 완료 안내 */
+.w-done {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px 8px 12px 14px;
+  border-radius: 16px;
+  background: #e8f7ee;
+  animation: an-in 0.45s ease both;
+}
+
+.w-done__icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #1fa463;
+  color: #fff;
+  display: grid;
+  place-items: center;
+}
+
+.w-done__icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.w-done__txt {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.w-done__txt strong {
+  font-size: 14.5px;
+  color: #136a3c;
+}
+
+.w-done__txt span {
+  font-size: 12.5px;
+  color: #3d7f5b;
+}
+
+.w-done__close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: none;
+  color: #3d7f5b;
+  display: grid;
+  place-items: center;
+}
+
+.w-done__close svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 시연 패널: 해결패스가 알고 있는 정보 카드 (멀리서도 읽히도록 약 2배) */
+.demo-panel .dp-card--known {
+  padding: 22px 22px 18px;
+}
+
+.demo-panel .dp-card--known h2 {
+  margin: 0 0 16px;
+  font-size: 30px;
+  letter-spacing: -0.03em;
+}
+
+.demo-panel .dp-card--known .dp-nums--lines {
+  gap: 12px;
+}
+
+.demo-panel .dp-card--known .dp-num {
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 16px;
+}
+
+.demo-panel .dp-card--known .dp-num span {
+  font-size: 24px;
+  line-height: 1.3;
+  color: var(--text-2);
+}
+
+.demo-panel .dp-card--known .dp-nums--lines .dp-num strong {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+}
+
+.demo-panel .dp-card--known .dp-note {
+  margin: 4px 0 0;
+  font-size: 20px;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
+/* 세부 목표: 첫 줄(목표) 크기의 약 75%, 두 열 배치 */
+.demo-panel .dp-card--known .dp-nums--sub {
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.demo-panel .dp-card--known .dp-num.dp-num--sub {
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.demo-panel .dp-card--known .dp-num.dp-num--sub span {
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.demo-panel .dp-card--known .dp-nums--sub .dp-num--sub strong {
+  font-size: 22.5px;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+}
+
+/* 새 정보가 들어온 줄: 페이드로 나타나고, 파란 빛이 ease로 번졌다가 기본 배경으로 부드럽게 돌아간다.
+   마지막 프레임을 기본 배경과 같게 맞춰, 강조가 끝나고 다시 그려질 때 색이 튀지 않게 한다. */
+@keyframes dp-new-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes dp-new-glow {
+  0% {
+    background: #e3efff;
+    box-shadow: 0 0 0 0 rgba(36, 136, 243, 0);
+  }
+  30% {
+    background: #cfe4ff;
+    box-shadow: 0 0 0 6px rgba(36, 136, 243, 0.16);
+  }
+  100% {
+    background: #f4f7fb;
+    box-shadow: 0 0 0 0 rgba(36, 136, 243, 0);
+  }
+}
+
+@keyframes dp-new-badge {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  12%,
+  78% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+.demo-panel .dp-card--known .dp-num.is-new {
+  animation: dp-new-in 0.5s ease both, dp-new-glow 2.6s ease both;
+}
+
+.demo-panel .dp-new {
+  display: inline-block;
+  margin-right: 10px;
+  padding: 2px 12px;
+  border-radius: 999px;
+  background: var(--won-blue);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.5;
+  vertical-align: middle;
+  transform-origin: left center;
+  animation: dp-new-badge 2.6s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo-panel .dp-card--known .dp-num.is-new,
+  .demo-panel .dp-new {
+    animation: none;
+  }
+}
+
+/* 채팅: 지출 줄이기 제안 드롭다운 안 목록 */
+.an-more .cut-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 2px 14px;
+  border: 1px solid #e3e9f1;
+  border-radius: 12px;
+  background: #fff;
+  animation: an-in 0.35s ease both;
+}
+
+.cut-list li {
+  padding: 10px 0;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.cut-list li:last-child {
+  border-bottom: 0;
+}
+
+.cut-list__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.cut-list__row b {
+  color: var(--won-blue);
+  font-weight: 800;
+}
+
+.cut-list p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-3);
 }

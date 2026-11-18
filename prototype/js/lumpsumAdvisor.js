@@ -9,6 +9,8 @@
   const WSP = window.WSP;
 
   const SAVINGS_RATE = 0.032;
+  /** 투자 몫의 기대 수익(가정). 화면에는 "연 6%로 가정"이라고 밝힌다 */
+  const INVEST_ASSUMED_RATE = 0.06;
   const DEBT_RATE = 0.055;
   const DEBT_MONTHS = 60;
   const EMERGENCY_MIN = 3;
@@ -141,6 +143,13 @@
     return { label: label, value: value, note: note || '', tone: tone || '' };
   }
 
+  /** 어림한 금액은 만원 단위로 맞추고 앞에 "약"을 붙인다. 0은 "0원", 음수는 "약 -10만원" */
+  function about(n) {
+    const v = roundMan(n);
+    if (v === 0) return '0원';
+    return '약 ' + (v < 0 ? '-' : '') + WSP.utils.formatMan(Math.abs(v));
+  }
+
   /** 음수도 만원 단위로 쓴다. -100000 → "-10만원" */
   function manSigned(n) {
     const v = Number(n) || 0;
@@ -235,6 +244,64 @@
   }
 
   /**
+   * 목표 기간 말의 예상 금액. 여유 중 투자 몫은 연 6%(가정), 나머지 여유와 예금은 적금 금리로 본다.
+   * share가 같으면 advise의 monthlyInvest와 같은 방식으로 나눈다.
+   */
+  function plannedFuture(a, share) {
+    const months = a.goalMonths;
+    const save = Math.max(0, a.surplus);
+    const invest = roundMan(save * share);
+    return Math.round(annuityFv(invest, INVEST_ASSUMED_RATE, months) + annuityFv(save - invest, SAVINGS_RATE, months) + grow(a.deposit, SAVINGS_RATE, months));
+  }
+
+  /**
+   * 적금 + 투자(MIX)에서 여유 돈을 전부 투자해도(연 6% 가정) 목표에 못 닿는지 본다.
+   * 못 닿으면 { planned: 전부 투자했을 때 예상 금액, short: 모자란 돈, yieldRate: 필요한 연 수익(소수), unrealistic: 연 12% 이상 }.
+   * 닿거나 MIX가 아니면 null. 성향을 묻기 전에 "투자로도 어렵다"를 먼저 알리는 데 쓴다.
+   */
+  function infeasible(a) {
+    if (!a || a.decisionId !== 'MIX' || a.surplus <= 0) return null;
+    const planned = plannedFuture(a, 1);
+    if (planned >= a.goalAmount) return null;
+    return { planned: planned, short: a.goalAmount - planned, yieldRate: a.yieldRate, unrealistic: a.yieldRate >= 0.12 };
+  }
+
+  /** 부족하면 "약 24만원 부족", 아니면 about과 같다. 음수를 그대로 쓰지 않는다 */
+  function aboutGap(n) {
+    const v = roundMan(n);
+    if (v < 0) return '약 ' + WSP.utils.formatMan(Math.abs(v)) + ' 부족';
+    return about(v);
+  }
+
+  /**
+   * 적금 + 투자(MIX)에서 투자 비중대로 해도 목표에 못 미치는지 본다.
+   * 못 미치면 { shortfall: 부족한 돈, planned: 예상 금액, neededShare: 목표에 닿는 투자 비중(5% 단위, 없으면 null) }.
+   * 닿는다면 neededShare가 그 비중이고, 여유를 전부 투자해도 닿지 않으면 null이다.
+   */
+  function shortfall(a) {
+    if (!a || a.decisionId !== 'MIX' || a.surplus <= 0) return null;
+    const planned = plannedFuture(a, a.investShare);
+    if (planned >= a.goalAmount) return null;
+    let needed = null;
+    if (plannedFuture(a, 1) >= a.goalAmount) {
+      let lo = a.investShare;
+      let hi = 1;
+      for (let i = 0; i < 40; i++) {
+        const mid = (lo + hi) / 2;
+        if (plannedFuture(a, mid) >= a.goalAmount) hi = mid;
+        else lo = mid;
+      }
+      needed = Math.min(1, Math.ceil(hi * 20) / 20);
+    }
+    return {
+      shortfall: a.goalAmount - planned,
+      planned: planned,
+      neededShare: needed,
+      neededMonthly: needed == null ? null : roundMan(Math.max(0, a.surplus) * needed),
+    };
+  }
+
+  /**
    * @param {{income:number,expense:number,debt:number,deposit:number,goalAmount:number,goalMonths:number,expText?:string,lossText?:string}} input
    */
   function advise(input) {
@@ -269,46 +336,56 @@
     let share = PROFILE_SHARE[profile.id] || PROFILE_SHARE.NEUTRAL;
     if (decisionId === 'EMERGENCY_FIRST') share *= 0.5;
     if (decisionId === 'SAVINGS_ENOUGH') share *= 0.35;
-    if (input.investFocus && (decisionId === 'MIX' || decisionId === 'SAVINGS_ENOUGH' || decisionId === 'DEBT_FIRST')) share = Math.min(0.85, share + 0.15);
+    let focusApplied = false;
+    if (input.investFocus && (decisionId === 'MIX' || decisionId === 'SAVINGS_ENOUGH' || decisionId === 'DEBT_FIRST')) {
+      share = Math.min(0.85, share + 0.15);
+      focusApplied = true;
+    }
+    /* 목표를 채우려고 고객이 과감한 비중을 고르면 그 비중을 쓴다 */
+    let boldApplied = false;
+    if (input.boldShare != null) {
+      share = Math.min(1, Math.max(0, Number(input.boldShare) || 0));
+      boldApplied = true;
+    }
     const investBase = decisionId === 'SPEND_CHECK' ? 0 : Math.max(0, surplus);
     const monthlyInvest = roundMan(investBase * share);
     const split = PROFILE_SPLIT[profile.id] || PROFILE_SPLIT.NEUTRAL;
+    /** 매달 투자할 돈의 근거 문장. 금액이 어디서 나왔는지 카드에서 바로 보이게 한다 */
+    const investNote = (decisionId === 'DEBT_FIRST' ? '갚고 남는 돈 ' : '월 여유 ') + about(investBase) + '의 ' + Math.round(share * 100) + '%';
 
-    const incomeFigs = [fig('평균 수입', man(income), ''), fig('평균 지출', man(expense), '')];
+    const incomeFigs = [fig('평균 수입', about(income), ''), fig('평균 지출', about(expense), '')];
     const balanceFigs = [
-      fig('월평균 여유 자금', man(Math.max(0, before)), before <= 0 ? '지출이 월급보다 많아요' : '', before <= 0 ? 'warning' : ''),
-      fig('예적금 및 현금', man(deposit), '생활비 ' + emergencyMonths + '개월치', emergencyMonths < EMERGENCY_MIN ? 'warning' : ''),
+      fig('월평균 여유 자금', about(Math.max(0, before)), before <= 0 ? '지출이 월급보다 많아요' : '', before <= 0 ? 'warning' : ''),
+      fig('예적금 및 현금', about(deposit), '생활비 ' + emergencyMonths + '개월치', emergencyMonths < EMERGENCY_MIN ? 'warning' : ''),
     ];
 
     let decisionFigs = [];
     if (decisionId === 'SPEND_CHECK') {
-      decisionFigs = [fig('월급', man(income), ''), fig('지출', man(expense), ''), fig('월 여유', manSigned(surplus), '0원 이하', 'warning')];
+      decisionFigs = [fig('월급', about(income), ''), fig('지출', about(expense), ''), fig('월 여유', surplus < 0 ? aboutGap(surplus) : '0원', payment > 0 ? '부채 상환 포함' : '', 'warning')];
     } else if (decisionId === 'DEBT_FIRST') {
       decisionFigs = [
-        fig('갚기 전 월 여유', man(before), ''),
-        fig('매달 갚을 돈', man(payment), '연 5.5% · 60개월'),
-        fig('갚고 남는 여력', man(Math.max(0, surplus)), ''),
+        fig('갚기 전 월 여유', about(before), ''),
+        fig('매달 갚을 돈', about(payment), '연 5.5% · 60개월'),
+        fig('갚고 남는 여력', about(Math.max(0, surplus)), ''),
       ];
     } else if (decisionId === 'EMERGENCY_FIRST') {
       decisionFigs = [
         fig('비상자금', emergencyMonths + '개월', '기준 3개월'),
-        fig('예금', man(deposit), ''),
-        fig('월 여유', man(surplus), ''),
+        fig('예금', about(deposit), ''),
+        fig('월 여유', about(surplus), ''),
       ];
     } else if (decisionId === 'SAVINGS_ENOUGH') {
-      decisionFigs = [fig('적금으로 모이는 돈', '약 ' + man(future), goalMonths + '개월'), fig('목표', man(goalAmount), ''), fig('월 여유', man(surplus), '')];
+      decisionFigs = [fig('예금과 적금으로 모이는 돈', about(future), goalMonths + '개월'), fig('목표', man(goalAmount), ''), fig('월 여유', about(surplus), '')];
     } else {
       decisionFigs = [
-        fig('적금으로 모이는 돈', '약 ' + man(future), ''),
-        fig('목표까지 부족한 돈', man(gap), ''),
-        fig('필요한 월 저축', man(requiredMonthly), '연 3.2% 적금 기준'),
+        fig('예금과 적금으로 모이는 돈', about(future), ''),
+        fig('목표까지 부족한 돈', about(gap), ''),
+        fig('필요한 월 저축', about(requiredMonthly), '연 3.2% 적금 기준'),
       ];
     }
 
-    const recommendFigs =
-      monthlyInvest > 0
-        ? [fig('매달 투자할 돈', '월 ' + man(monthlyInvest), ''), fig('국내 비중', split[0] + '%', ''), fig('해외 비중', split[1] + '%', '')]
-        : [];
+    /* 추천 카드는 금액만 보인다. 국내·해외 비중은 어느 시장을 볼지 고른 뒤에 말한다 */
+    const recommendFigs = monthlyInvest > 0 ? [fig('매달 투자할 돈', '월 ' + about(monthlyInvest), investNote)] : [];
 
     return {
       income: income,
@@ -333,6 +410,12 @@
       domesticShare: split[0],
       overseasShare: split[1],
       investFocus: !!input.investFocus,
+      focusApplied: focusApplied,
+      boldApplied: boldApplied,
+      investBase: investBase,
+      investShare: share,
+      domesticAmount: roundMan((monthlyInvest * split[0]) / 100),
+      overseasAmount: roundMan((monthlyInvest * split[1]) / 100),
       categories: categories(expense),
       figures: { income: incomeFigs, balance: balanceFigs, decision: decisionFigs.slice(0, 3), recommend: recommendFigs.slice(0, 3) },
     };
@@ -373,6 +456,12 @@
     FIXED_CATEGORIES: FIXED_CATEGORIES,
     INSIGHT_SOURCE: INSIGHT_SOURCE,
     manSigned: manSigned,
+    shortfall: shortfall,
+    infeasible: infeasible,
+    aboutGap: aboutGap,
+    plannedFuture: plannedFuture,
+    INVEST_ASSUMED_RATE: INVEST_ASSUMED_RATE,
+    about: about,
     inferRiskProfile: inferRiskProfile,
     advise: advise,
     defaultRequiredYield: defaultRequiredYield,

@@ -269,12 +269,18 @@
     }, '[자가 테스트] 목돈 프로필');
   }
 
+  /** 손실 질문에 답한 뒤 목표에 못 미치면 부족 안내가 한 번 나온다. 기존 흐름 테스트는 "지금 비중으로"를 골라 추천으로 간다 */
+  async function keepShare() {
+    if (WSP.app.fsms.lumpsum.state === 'SHORTFALL') await WSP.lumpsumFlow.accept('지금 비중으로 갈게요', 'sf-keep');
+  }
+
   async function lumpUntilGoal(goalId) {
     const L = WSP.lumpsumFlow;
     const goal = WSP.lumpsumAdvisor.GOALS[goalId || 'goal-100'];
     assert(L.startNew(), '목돈 상담 시작 ' + WSP.app.fsms.lumpsum.state);
     await L.accept(WSP.lumpsumScript.OPENING);
-    await L.accept(goal.text, goalId || 'goal-100');
+    /* 월 여유가 없으면 목표를 묻지 않고 바로 지출 계획으로 간다 */
+    if (WSP.app.fsms.lumpsum.state === 'GOAL') await L.accept(goal.text, goalId || 'goal-100');
     return WSP.app.session.lumpsum;
   }
 
@@ -294,6 +300,29 @@
     WSP.aiSchema.FORBIDDEN_PHRASES.forEach((re) => assert(!re.test(text), '완료 단정: ' + text));
   }
 
+  t('첫 질문의 해외주식 칩은 이전 상담으로 넘기지 않고 목돈 채팅에서 이어 간다', async () => {
+    fresh();
+    const L = WSP.lumpsumFlow;
+    const S0 = WSP.lumpsumScript;
+    assert(L.startNew(), '목돈 상담 시작');
+    const chip = S0.introChoices().find((c) => /해외주식/.test(c.text));
+    assert(chip, '해외주식 칩이 없음');
+    await L.accept(chip.text, chip.id);
+    const s = WSP.app.session.lumpsum;
+    assert(s && s.intent === 'OVERSEAS', '목돈 채팅이 끊김 / intent ' + (s && s.intent));
+    assert(WSP.app.fsms.lumpsum.state === 'NO_ACCOUNT', '상태 ' + WSP.app.fsms.lumpsum.state);
+    assert(!s.goal && s.goalKind === 'OVERSEAS_ACCOUNT', '목표 없이 해외 계좌로 감 / goalKind ' + s.goalKind);
+    const first = s.chat.find((m) => m.role === 'ai' && /해외주식 투자를 처음/.test(m.text));
+    assert(first, '해외주식 첫 답이 없음');
+    const all = s.chat.map((m) => m.text || '').join('\n');
+    assert(!/목돈|목표가 얼마|월 약|매달 남는/.test(all), '목돈 흐름 문구가 섞임: ' + all);
+    assert(s.prompt.choices.map((c) => c.id).join('|') === 'open-yes|open-no', '개설 선택지 ' + s.prompt.choices.map((c) => c.id));
+    assertClean(all);
+    const panel = WSP.goalInfo.describe({ lumpsum: s, lumpsumState: WSP.app.fsms.lumpsum.state });
+    const panelLabels = panel.rows.map((r) => r.label).join('|');
+    assert(panelLabels === '목표|해외 계좌', '해외 첫 시작 패널 줄 ' + panelLabels);
+  });
+
   t('통합 시나리오 상담: 목돈 불리기 7턴 → 해외주식 개설 신청', async () => {
     fresh();
     setMoney(3500000, 2100000, 0);
@@ -309,13 +338,15 @@
     await L.accept(WSP.lumpsumScript.situationText(0));
     await L.accept(LA.EXPERIENCE['exp-1'].text, 'exp-1');
     await L.accept(LA.LOSS['loss-1'].text, 'loss-1');
+    await keepShare();
     assert(s.advice.profile.id === 'NEUTRAL' && !s.advice.leverage, '성향 ' + s.advice.profile.id + ' / 레버리지 ' + s.advice.leverage);
     assert(!s.prompt.choices.some((c) => c.id === 'prod-lev'), '기본 경로에 레버리지');
     const reco = s.chat.filter((m) => m.role === 'ai' && /성향은/.test(m.text)).pop();
     const recoFigs = reco && reco.blocks.filter((b) => b.t === 'figures')[0];
     assert(recoFigs && recoFigs.figures.map((f) => f.value).join('|') === s.advice.figures.recommend.map((f) => f.value).join('|'), '추천 카드 숫자');
     assert(!/매달 투자 참고 금액/.test(reco.text), '추천 문장에 금액 문장이 남음');
-    assert(kindsOf(reco) === 'text,figures,text', '추천 블록 순서 ' + kindsOf(reco));
+    /* 부족 안내에서 "그래도 이 비중으로"를 골랐으면 받아 주는 문장이 맨 앞에 붙는다 */
+    assert(kindsOf(reco) === 'text,text,figures,text' && reco.blocks[0].text === WSP.lumpsumScript.keepAck(), '추천 블록 순서 ' + kindsOf(reco));
     await L.accept('해외주식', 'prod-os');
     await L.accept('네, 개설해 주세요', 'open-yes');
     assert(WSP.app.fsms.lumpsum.state === 'TO_JOIN', '상태 ' + WSP.app.fsms.lumpsum.state);
@@ -338,8 +369,19 @@
     assert(cut.plan.total <= cut.extra, '줄이는 금액이 필요한 만큼을 넘음 ' + cut.plan.total + ' / ' + cut.extra);
     const blocks = LS.decisionMessage(a).blocks;
     const text = blocks.filter((b) => b.t === 'text').map((b) => b.text).join('\n');
-    assert(/줄이면 저축이 그만큼 늘어서/.test(text) && blocks.some((b) => b.t === 'figures' && b.figures.some((f) => /줄인 뒤/.test(f.label))), '줄이기 블록 없음');
-    assertClean(text);
+    const drop = blocks.filter((b) => b.t === 'details');
+    assert(blocks[0].text === '목표까지 월 ' + WSP.lumpsumAdvisor.about(a.requiredMonthly) + '을 모아야 하는데, 적금만으로는 부족해요.', '결론 한 줄 ' + blocks[0].text);
+    assert(text.indexOf('소비를 **매달 ' + WSP.utils.formatMan(cut.plan.total) + '** 줄이면 필요한 연 수익이 ' + (Math.round(cut.yieldBefore * 1000) / 10) + '%에서') !== -1, '줄이기 한 줄 ' + text);
+    assert(drop.length === 1 && drop[0].label === '지출 줄이기 제안' && drop[0].cuts.length === cut.plan.items.length && drop[0].cuts.every((c) => c.label && c.saved > 0 && c.reason), '지출 줄이기 제안 드롭다운');
+    /* 문장 4개: 결론 / 소비를 줄이면 / 투자로도 어렵다 / 질문 */
+    assert(!blocks.some((b) => b.t === 'figures' && b.figures.some((f) => /줄인 뒤/.test(f.label))) && blocks.filter((b) => b.t === 'text').length === 4, '항목 문단과 전후 카드는 드롭다운 안으로');
+    const hopeTexts = blocks.filter((b) => b.t === 'text').map((b) => b.text);
+    assert(/여유 돈을 전부 투자해도\(연 6% 가정\)/.test(hopeTexts[2]) && /쉽지 않아요|현실적으로 어려워요/.test(hopeTexts[2]), '투자로도 어렵다는 문구 ' + hopeTexts[2]);
+    assert(hopeTexts[3] === '**목표를 조정할까요, 아니면 그래도 투자도 알아볼까요?**', '조정할지 그래도 투자할지 묻는 질문 ' + hopeTexts[3]);
+    assert(LA.infeasible(a) && LA.infeasible(a).unrealistic === (LA.infeasible(a).yieldRate >= 0.12), '비현실 판정');
+    const wild = LA.advise(Object.assign({}, base, { goalAmount: 100000000, goalMonths: 24 }));
+    assert(LA.infeasible(wild) && LA.infeasible(wild).unrealistic && /현실적으로 어려워요/.test(LS.decisionMessage(wild).blocks.map((b) => b.text || '').join('\n')), '크게 모자라면 현실적으로 어렵다고 말함');
+    assertClean(text + drop[0].cuts.map((c) => c.label + c.reason).join(''));
     const link = blocks.filter((b) => b.t === 'link');
     assert(link.length === 1 && link[0].action === 'spend-open' && /소비 분석/.test(link[0].label), '소비 분석 버튼 없음');
     assert(!/개별 이름은 말하지 않고/.test(WSP.lumpsumScript.bothMessage(a).blocks.map((b) => b.text).join('')), '두 계좌 답변에 군더더기 문장');
@@ -348,6 +390,223 @@
     const tight = LA.advise(Object.assign({}, base, { expense: 3600000 }));
     assert(tight.decisionId === 'SPEND_CHECK' && LA.cutForYield(tight) === null, '여유 없음은 기존 줄이기 계획 경로');
     assert(!LS.decisionMessage(tight).blocks.some((b) => b.t === 'text' && /줄인 뒤 필요한 연 수익/.test(b.text || '')), '여유 없음에 MIX 블록이 섞임');
+  });
+
+  t('판단 카드 금액은 만원 단위, 홈 쿠키의 물어보기는 진행 중이어도 새 채팅', async () => {
+    const LA = WSP.lumpsumAdvisor;
+    const mk = (over) => LA.advise(Object.assign({ income: 3500000, expense: 2100000, debt: 0, deposit: LA.DEPOSIT_DEFAULT, goalAmount: 80000000, goalMonths: 36, expText: LA.EXPERIENCE['exp-1'].text, lossText: LA.LOSS['loss-1'].text }, over || {}));
+    const unit = /(만|억)원$|개월$/;
+    [mk(), mk({ debt: 30000000 }), mk({ goalAmount: 30000000, income: 5000000 }), mk({ deposit: 3000000 })].forEach((a) => {
+      const all = [].concat(a.figures.income, a.figures.balance, a.figures.decision, a.figures.recommend);
+      const bad = all.filter((f) => !unit.test(f.value.replace(/^월 /, '')));
+      assert(!bad.length, a.decisionId + ' 카드에 원 단위: ' + bad.map((f) => f.label + '=' + f.value).join(', '));
+      const noAbout = all.filter((f) => f.label !== '목표' && /(만|억)원$/.test(f.value) && !/^(월 )?약 /.test(f.value));
+      assert(!noAbout.length, a.decisionId + ' 카드에 "약" 없음: ' + noAbout.map((f) => f.label + '=' + f.value).join(', '));
+    });
+    const mix = mk();
+    assert(mix.figures.decision[0].value === '약 6,216만원' && mix.figures.decision[1].value === '약 1,784만원', '적금으로 모이는 돈·부족한 돈 ' + mix.figures.decision.map((f) => f.value).join('|'));
+
+    fresh();
+    setMoney(3500000, 2100000, 0);
+    const s = await lumpUntilGoal('goal-100');
+    assert(WSP.app.fsms.lumpsum.state === 'DEBT_CHECK' && s.chat.length > 3, '진행 중 상담');
+    assert(WSP.lumpsumFlow.startFresh() === true, '새 채팅 열기');
+    const n = WSP.app.session.lumpsum;
+    assert(WSP.app.fsms.lumpsum.state === 'INTRO' && n !== s && n.chat.length === 1 && n.chat[0].role === 'ai' && !n.goalKind, '새 채팅 상태 ' + WSP.app.fsms.lumpsum.state + ' / 채팅 ' + n.chat.length);
+    assert(WSP.lumpsumFlow.startFresh() === true && WSP.app.session.lumpsum.chat.length === 1, '새 채팅 위에서 다시 눌러도 새 채팅');
+
+    /* 쿠키의 문장은 새 채팅에서 입력되어 전송까지 된다 */
+    const line = '비상자금이 충분한지 알고 싶어요.';
+    assert(WSP.lumpsumFlow.startFresh(line) === true, '쿠키 새 채팅');
+    await new Promise((r) => setTimeout(r, 120));
+    const sent = WSP.app.session.lumpsum.chat.filter((m) => m.role === 'user');
+    assert(sent.length === 1 && sent[0].text === line, '쿠키 문장 전송 ' + JSON.stringify(sent.map((m) => m.text)));
+    assert(WSP.app.fsms.lumpsum.state !== 'INTRO', '전송 뒤 다음 단계로 진행 ' + WSP.app.fsms.lumpsum.state);
+  });
+
+  t('판단 뒤에는 질문이 나오고, 아니요는 투자 없이 마치며, 질문 없는 선택지는 없음', async () => {
+    fresh();
+    setMoney(3500000, 2100000, 0);
+    const s = await lumpUntilGoal('goal-100');
+    assert(WSP.app.fsms.lumpsum.state === 'DEBT_CHECK', '판단 뒤 단계 ' + WSP.app.fsms.lumpsum.state);
+    const last = s.chat[s.chat.length - 1];
+    /* 기본 인물의 1억 3년은 투자로도 어렵다: 성향을 묻기 전에 먼저 알리고, 목표 조정과 "그래도 투자"를 함께 묻는다 */
+    assert(JSON.stringify(last.blocks).indexOf('목표를 조정할까요, 아니면 그래도 투자도 알아볼까요?') !== -1, '판단 뒤 질문 없음');
+    const choices = s.prompt.choices.map((c) => c.id + ':' + c.text);
+    assert(choices.join('|') === 'sf-amount:목표를 5천만 원·5년으로 낮출게요|sf-period:기간을 5년으로 늘릴게요|inv-yes:그래도 투자도 알아볼게요|inv-no:아니요, 여기서 마칠게요', '선택지 ' + choices.join('|'));
+    await WSP.lumpsumFlow.accept('아니요, 여기서 마칠게요', 'inv-no');
+    assert(WSP.app.fsms.lumpsum.state === 'CLOSED' && s.investFocus !== true, '아니요 → 종료 ' + WSP.app.fsms.lumpsum.state);
+    assert(/투자는 빼고/.test(s.chat[s.chat.length - 1].text || '') && /목표나 기간을 조정/.test(s.chat[s.chat.length - 1].text || '') && !/위 금액/.test(s.chat[s.chat.length - 1].text || ''), '종료 안내');
+
+    /* 판단마다 질문과 마무리 문장이 맞는다: 적금으로 충분하면 주식을 하고 싶을 때만 이어 간다 */
+    const SC = WSP.lumpsumScript;
+    const LA = WSP.lumpsumAdvisor;
+    const mk = (over) => LA.advise(Object.assign({ income: 3500000, expense: 2100000, debt: 0, deposit: LA.DEPOSIT_DEFAULT, goalAmount: 20000000, goalMonths: 12 }, over || {}));
+    const enough = mk({ goalAmount: 20000000, goalMonths: 12, income: 8000000, expense: 2000000 });
+    assert(enough.decisionId === 'SAVINGS_ENOUGH', '적금 충분 ' + enough.decisionId);
+    assert(SC.investQuestion(enough) === '**혹시 주식 투자도 해 보고 싶으세요?**' && SC.investChoices(enough).map((c) => c.text).join('|') === '네, 투자도 해보고 싶어요|아니요, 적금으로 갈게요', '적금 충분 질문');
+    assert(/주식은 빼고 적금으로 가요/.test(SC.stopMessage(enough).text) && !/위 금액/.test(SC.stopMessage(enough).text), '적금 충분 마무리');
+    const debt = mk({ debt: 30000000, goalAmount: 100000000, goalMonths: 36 });
+    assert(debt.decisionId === 'DEBT_FIRST' && SC.investQuestion(debt) === '**그래도 투자도 알아볼까요?**' && /대출 상환을 먼저/.test(SC.stopMessage(debt).text), '상환 우선 질문·마무리');
+    assert(/목표는 상환을 이어 가면서/.test(SC.decisionSentence(debt)), '상환 우선 판단에 목표 언급');
+    const emg = mk({ deposit: 1000000, goalAmount: 100000000, goalMonths: 36 });
+    assert(emg.decisionId === 'EMERGENCY_FIRST' && /매달 약 \d+만원씩 예금에 모으면 \d+개월이면 채워져요/.test(SC.decisionSentence(emg)) && /그다음에 보는 게 안전/.test(SC.decisionSentence(emg)), '비상자금 우선: 채우는 방법과 목표 언급 ' + SC.decisionSentence(emg));
+    assert(/비상자금부터 채워/.test(SC.stopMessage(emg).text) && SC.investChoices(emg)[1].text === '아니요, 비상자금부터 채울게요', '비상자금 우선 마무리');
+  });
+
+  t('제자리 갱신: 이미 보이던 요소는 지워지지 않고, 바뀐 부분만 고쳐지며, 애니메이션 표시가 유지됨', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    try {
+      const html = (n, extra) => '<div class="msg" data-mid="a"><p class="blk is-new" data-bi="0">첫 문장</p></div>' + (n > 1 ? '<div class="msg" data-mid="b"><p class="blk" data-bi="0">' + extra + '</p></div>' : '');
+      WSP.ui.morphInner(host, html(1), { keepNew: true });
+      const first = host.querySelector('[data-mid="a"]');
+      const p = first.querySelector('p');
+      WSP.ui.morphInner(host, html(2, '둘째'), { keepNew: true });
+      assert(host.querySelector('[data-mid="a"]') === first && first.querySelector('p') === p, '기존 요소 유지');
+      assert(host.children.length === 2 && host.querySelector('[data-mid="b"] p').textContent === '둘째', '새 요소 추가');
+      /* 새 HTML이 is-new를 빼도 재생 중인 표시는 그대로 */
+      const plain = (extra) => '<div class="msg" data-mid="a"><p class="blk" data-bi="0">첫 문장</p></div><div class="msg" data-mid="b"><p class="blk" data-bi="0">' + extra + '</p></div>';
+      WSP.ui.morphInner(host, plain('둘째 수정'), { keepNew: true });
+      assert(p.classList.contains('is-new') && host.querySelector('[data-mid="b"] p').textContent === '둘째 수정', 'is-new 유지·글자 수정');
+      WSP.ui.morphInner(host, '<div class="msg" data-mid="a"><p class="blk" data-bi="0">첫 문장</p></div>', { keepNew: true });
+      assert(host.children.length === 1 && host.firstChild === first, '없어진 요소 제거');
+    } finally {
+      host.remove();
+    }
+  });
+
+  t('목표에 못 미치면 부족분과 필요한 투자 비중을 알리고, 닿으면 안내하지 않음', async () => {
+    const LA = WSP.lumpsumAdvisor;
+    const base = { income: 3200000, expense: 2000000, debt: 0, deposit: LA.DEPOSIT_DEFAULT, goalAmount: 80000000, goalMonths: 36, expText: LA.EXPERIENCE['exp-0'].text, lossText: LA.LOSS['loss-0'].text, investFocus: true };
+    const a = LA.advise(base);
+    const info = LA.shortfall(a);
+    assert(a.decisionId === 'MIX' && info && info.shortfall > 0, '부족 판정 ' + a.decisionId + ' ' + JSON.stringify(info));
+    assert(info.neededShare === null || (info.neededShare > a.investShare && info.neededShare <= 1), '필요한 비중 ' + info.neededShare);
+    if (info.neededShare) {
+      assert(LA.plannedFuture(a, info.neededShare) >= a.goalAmount && LA.plannedFuture(a, info.neededShare - 0.05) < a.goalAmount, '필요한 비중은 최소값');
+    }
+    assert(LA.shortfall(LA.advise(Object.assign({}, base, { goalAmount: 50000000, goalMonths: 60 }))) === null, '5천 5년은 적금으로 닿음');
+    const bold = LA.advise(Object.assign({}, base, { boldShare: info.neededShare || 1 }));
+    assert(bold.boldApplied && bold.investShare === (info.neededShare || 1) && bold.monthlyInvest > a.monthlyInvest, '과감한 비중 적용 ' + bold.monthlyInvest);
+  });
+
+  t('손실 답 뒤 부족 단계: 안내와 선택지, 과감한 투자는 비중을 올리고 목표 조정은 다시 계산', async () => {
+    fresh();
+    setMoney(3200000, 2000000, 0);
+    const L = WSP.lumpsumFlow;
+    const LA = WSP.lumpsumAdvisor;
+    const LS = WSP.lumpsumScript;
+    assert(L.startNew(), '부족 흐름 시작');
+    await L.accept(LS.OPENING);
+    await L.accept(LA.GOAL_TYPED.text);
+    await L.accept(LS.situationText(0));
+    await L.accept(LA.EXPERIENCE['exp-0'].text, 'exp-0');
+    await L.accept(LA.LOSS['loss-0'].text, 'loss-0');
+    const s = WSP.app.session.lumpsum;
+    const info = LA.shortfall(s.advice);
+    assert(info && WSP.app.fsms.lumpsum.state === 'SHORTFALL', '부족 단계 ' + WSP.app.fsms.lumpsum.state);
+    const last = s.chat[s.chat.length - 1];
+    assert(/목표에는? .*못 미쳐요/.test(JSON.stringify(last)) && /연 6%로 가정/.test(JSON.stringify(last)), '부족 안내 문장');
+    /* 이미 "투자로도 어렵다"고 알렸으므로 같은 말을 되풀이하지 않고 그걸 이어받는다 */
+    if (!info.neededShare) assert(/앞서 말씀드린 대로/.test(JSON.stringify(last)) && !/여유 돈을 전부 투자해도/.test(JSON.stringify(last)), '부족 안내가 앞 안내를 되풀이함');
+    const ids = s.prompt.choices.map((c) => c.id);
+    assert(ids.indexOf('sf-keep') !== -1 && ids.indexOf('sf-period') !== -1 && (ids.indexOf('sf-bold') !== -1) === !!info.neededShare, '선택지 ' + ids.join(','));
+    if (info.neededShare) {
+      const bold = s.prompt.choices.find((c) => c.id === 'sf-bold');
+      await L.accept(bold.text, 'sf-bold');
+      assert(WSP.app.fsms.lumpsum.state === 'RECOMMEND' && s.boldShare === info.neededShare && s.advice.investShare === info.neededShare, '과감한 투자 ' + s.advice.investShare);
+    }
+    fresh();
+    setMoney(3200000, 2000000, 0);
+    assert(L.startNew(), '목표 조정 시작');
+    await L.accept(LS.OPENING);
+    await L.accept(LA.GOAL_TYPED.text);
+    await L.accept(LS.situationText(0));
+    await L.accept(LA.EXPERIENCE['exp-0'].text, 'exp-0');
+    await L.accept(LA.LOSS['loss-0'].text, 'loss-0');
+    const adj = WSP.app.session.lumpsum.prompt.choices.find((c) => c.id === 'sf-period');
+    await L.accept(adj.text, 'sf-period');
+    const t = WSP.app.session.lumpsum;
+    /* 목표를 바꾸면 바뀐 목표로 판단을 다시 내고(DEBT_CHECK), 이미 답한 성향은 다시 묻지 않는다 */
+    assert(t.goal.months === 60 && WSP.app.fsms.lumpsum.state === 'DEBT_CHECK', '기간 조정 ' + WSP.app.fsms.lumpsum.state + ' ' + (t.goal && t.goal.months));
+    const re = t.chat[t.chat.length - 1];
+    assert(/목표를 \*\*5년 안에 8,000만원\*\*으로 바꿔서 다시 계산했어요/.test(re.blocks[0].text), '바꾼 목표 안내 ' + re.blocks[0].text);
+    assert(t.advice.decisionId === 'SAVINGS_ENOUGH' && /혹시 주식 투자도 해 보고 싶으세요/.test(JSON.stringify(re)), '적금으로 충분하면 주식은 원할 때만 ' + t.advice.decisionId);
+    assert(!/투자 비중도 같이 볼까요/.test(JSON.stringify(re)), '이미 닿는 목표에 투자 비중을 다시 권함');
+    await L.accept('네, 투자도 해보고 싶어요', 'inv-yes');
+    assert(WSP.app.fsms.lumpsum.state === 'RECOMMEND', '성향을 다시 묻지 않고 추천으로 ' + WSP.app.fsms.lumpsum.state);
+    const rec = t.chat[t.chat.length - 1];
+    assert(/목표는 적금으로 채워지니/.test(rec.text) && !/투자에 더 집중하고 싶다고 하셔서/.test(t.chat.map((m) => m.text).join('\n')), '적금 충분 추천 문장 ' + rec.text);
+  });
+
+  t('투자 질문의 "예"는 투자에 더 집중한다는 말이 아니고, 직접 쓴 말만 비중을 높인다', async () => {
+    const L = WSP.lumpsumFlow;
+    const LA = WSP.lumpsumAdvisor;
+    const LS = WSP.lumpsumScript;
+    const run = async (typed) => {
+      fresh();
+      setMoney(3500000, 2100000, 0);
+      assert(L.startNew(), '시작');
+      await L.accept(LS.OPENING);
+      await L.accept(LA.GOALS['goal-100'].text, 'goal-100');
+      if (typed) await L.accept(LS.situationText());
+      else await L.accept('그래도 투자도 알아볼게요', 'inv-yes');
+      await L.accept(LA.EXPERIENCE['exp-1'].text, 'exp-1');
+      await L.accept(LA.LOSS['loss-1'].text, 'loss-1');
+      await keepShare();
+      const s = WSP.app.session.lumpsum;
+      return { s: s, all: s.chat.map((m) => m.text || '').join('\n') };
+    };
+    const yes = await run(false);
+    assert(yes.s.investFocus === false && !/투자에 더 집중/.test(yes.all) && /투자도 같이 볼게요|그래도 투자로 얼마나 가까워지는지/.test(yes.all), '선택지 예에서 집중이라고 함 ' + yes.all);
+    assert(!yes.s.advice.focusApplied && yes.s.advice.investShare === 0.45, '비중 가산 없음 ' + yes.s.advice.investShare);
+    const typed = await run(true);
+    assert(typed.s.investFocus === true && /투자에 더 집중/.test(typed.all) && typed.s.advice.focusApplied, '직접 쓴 말은 집중 ' + typed.all);
+  });
+
+  t('투자 성향 읽기 문장은 두 답변을 각각 읽고 서로 어긋나지 않는다', async () => {
+    const LA = WSP.lumpsumAdvisor;
+    const LS = WSP.lumpsumScript;
+    const mk = (e, l) => {
+      const a = LA.advise({ income: 3500000, expense: 2100000, debt: 0, deposit: LA.DEPOSIT_DEFAULT, goalAmount: 20000000, goalMonths: 12, expText: LA.EXPERIENCE[e].text, lossText: LA.LOSS[l].text });
+      return LS.recommendMessage(a, LA.EXPERIENCE[e].text, LA.LOSS[l].text, 1).blocks[0].text;
+    };
+    assert(!/경험이 적/.test(mk('exp-2', 'loss-0')) && /경험은 꽤 있는 편/.test(mk('exp-2', 'loss-0')) && /안정으로/.test(mk('exp-2', 'loss-0')), '자주 하는데 경험이 적다고 함 ' + mk('exp-2', 'loss-0'));
+    assert(!/경험은 적지만/.test(mk('exp-2', 'loss-1')) && /경험은 꽤 있는 편/.test(mk('exp-2', 'loss-1')), '자주 하는데 경험은 적지만 ' + mk('exp-2', 'loss-1'));
+    assert(/아직 없는 편/.test(mk('exp-0', 'loss-2')) && /더 살 수 있는 쪽/.test(mk('exp-0', 'loss-2')), '경험 없음 + 더 산다');
+    const a = LA.advise({ income: 3500000, expense: 2100000, debt: 0, deposit: LA.DEPOSIT_DEFAULT, goalAmount: 20000000, goalMonths: 12, expText: LS.TYPED.PROFILING, lossText: LS.TYPED.LOSS });
+    const typed = LS.recommendMessage(a, LS.TYPED.PROFILING, LS.TYPED.LOSS, 1).blocks[0].text;
+    assert(/연금이나 펀드를 조금/.test(typed) && /반등하면 정리하는 쪽/.test(typed) && !/장기로 볼 수 있는/.test(typed), '직접 쓴 답변 읽기 ' + typed);
+  });
+
+  t('추천 카드는 투자 금액과 근거만, 국내·해외 비중은 시장을 고른 뒤', async () => {
+    const LA = WSP.lumpsumAdvisor;
+    const LS = WSP.lumpsumScript;
+    const man = WSP.utils.formatMan;
+    const exp = LA.EXPERIENCE['exp-1'].text;
+    const loss = LA.LOSS['loss-1'].text;
+    const a = LA.advise({ income: 3500000, expense: 2100000, debt: 30000000, deposit: LA.DEPOSIT_DEFAULT, goalAmount: 80000000, goalMonths: 36, expText: exp, lossText: loss, investFocus: true });
+    assert(a.decisionId === 'DEBT_FIRST' && a.focusApplied, '판단 ' + a.decisionId + ' / 집중 ' + a.focusApplied);
+    assert(Math.abs(a.investShare - 0.6) < 1e-9, '비중 ' + a.investShare);
+    assert(a.monthlyInvest === Math.round((a.investBase * a.investShare) / 10000) * 10000, '금액 ' + a.monthlyInvest);
+    const msg = LS.recommendMessage(a, exp, loss, 1);
+    const figs = msg.blocks.filter((b) => b.t === 'figures');
+    assert(figs.length === 1 && figs[0].figures.length === 1 && figs[0].figures[0].label === '매달 투자할 돈', '추천 카드 ' + figs.length);
+    assert(/갚고 남는 돈 .*의 60%/.test(figs[0].figures[0].note), '근거 문구 ' + figs[0].figures[0].note);
+    const all = JSON.stringify(msg);
+    assert(!/국내 비중|해외 비중/.test(all), '추천 카드에 비중이 보임');
+    const side = LS.sideStop('prod-dom', a).text;
+    /* 100%가 무엇의 100%인지 풀어 쓴다: 매달 투자할 돈 전부를 그 시장에 넣는다 */
+    assert(/매달 투자할 .+ 전부를 국내주식에 넣는 거예요\(국내 100%\)/.test(side) && side.indexOf(WSP.lumpsumAdvisor.about(a.monthlyInvest)) !== -1, '국내만 보면 국내 100% ' + side);
+    const no = LS.noAccount(a).text;
+    assert(/매달 투자할 .+ 전부를 해외주식에 넣는 거예요\(해외 100%\)/.test(no) && no.indexOf(WSP.lumpsumAdvisor.about(a.monthlyInvest)) !== -1 && /외화 계좌가 필요한데 아직 없네요/.test(no) && /개설 도와드릴까요/.test(no), '해외만 보면 해외 100% ' + no);
+    const noFx = LS.noAccount(a, false, true).text;
+    assert(/외화 계좌는 이미 있어요/.test(noFx) && !/아직 없네요/.test(noFx) && /개설을 도와드릴까요/.test(noFx), '외화 계좌가 있으면 있다고 말함 ' + noFx);
+    const both = LS.bothMessage(a).blocks.map((b) => b.text).join(' ');
+    assert(both.indexOf('국내주식에 ' + a.domesticShare + '%(' + WSP.lumpsumAdvisor.about(a.domesticAmount) + ')') !== -1 && both.indexOf('해외주식에 ' + a.overseasShare + '%(' + WSP.lumpsumAdvisor.about(a.overseasAmount) + ')') !== -1 && /개설 도와드릴까요/.test(both), '두 시장은 추천 비중 ' + both);
+    assert(Math.abs(a.domesticAmount + a.overseasAmount - a.monthlyInvest) <= 10000, '비중 금액 합계');
+    assertClean(msg.blocks.filter((b) => b.t === 'text').map((b) => b.text).join('\n') + side + no);
   });
 
   t('목돈 판단 분기, 성향, 스냅샷, 금지 문구', async () => {
@@ -397,8 +656,8 @@
     setMoney(3500000, 3600000, 0);
     assert(s.snap.expense === frozen && s.advice.decisionId === frozenId, '진행 중 스냅샷이 바뀜');
     const L = WSP.lumpsumFlow;
-    await L.accept(LS.MISMATCH[0].text, LS.MISMATCH[0].id);
-    assert(s.advice.decisionId === 'MIX', '추천 질문이 판단을 바꿈');
+    await L.accept('그래도 투자도 알아볼게요', 'inv-yes');
+    assert(s.advice.decisionId === 'MIX' && s.investFocus === false, '투자 질문 답이 판단을 바꿈');
     WSP.app.fsms.lumpsum.transition('EXIT');
     WSP.app.fsms.lumpsum.transition('NEW_CASE');
     s = await lumpUntilGoal('goal-100');
@@ -412,10 +671,16 @@
     await L.accept(LS.situationText(0));
     await L.accept(LA.EXPERIENCE['exp-2'].text, 'exp-2');
     await L.accept(LA.LOSS['loss-2'].text, 'loss-2');
+    await keepShare();
     s = WSP.app.session.lumpsum;
     assert(s.advice.decisionId === 'MIX' && s.advice.profile.id === 'ACTIVE' && s.advice.leverage, '레버리지 조건 ' + s.advice.decisionId + ' ' + s.advice.yieldRate);
     assert(s.prompt.choices.some((c) => c.id === 'prod-lev'), '레버리지 선택지');
     assert(/넣은 돈보다 더 잃을 수 있어요/.test(s.chat.map((m) => m.text).join('\n')), '손실 경고');
+    /* 레버리지를 고르면 같은 경고를 되풀이하지 않고, 이번 상담에서 이어 가지 않는다고 말한 뒤 국내·해외를 다시 묻는다 */
+    await L.accept('레버리지 상품', 'prod-lev');
+    assert(WSP.app.fsms.lumpsum.state === 'RECOMMEND' && s.prompt.choices.map((c) => c.id).join('|') === 'prod-dom|prod-os', '레버리지 뒤 다시 국내·해외 ' + WSP.app.fsms.lumpsum.state + ' ' + s.prompt.choices.map((c) => c.id));
+    assert(/국내주식과 해외주식 중 어느 쪽으로 볼까요/.test(s.chat[s.chat.length - 1].text), '다시 묻는 문장');
+    assert(s.chat.map((m) => m.text).join('\n').split('넣은 돈보다 더 잃을 수 있어요').length === 2, '경고가 한 번만 나옴');
     await L.accept('국내주식', 'prod-dom');
     assert(WSP.app.fsms.lumpsum.state === 'CLOSED' && WSP.app.fsms.join.state === 'IDLE', '국내주식은 가입으로 가지 않음');
 
@@ -424,7 +689,7 @@
     assert(sum === 2100000, '막대 합 ' + sum);
   });
 
-  t('목돈 첫 질문: 인사와 선택지 3개, 선택지는 이전 상담으로 이어짐', async () => {
+  t('목돈 첫 질문: 인사와 선택지 3개, 해외주식 외 선택지는 이전 상담으로 이어짐', async () => {
     fresh();
     setMoney(3500000, 2100000, 0);
     const L = WSP.lumpsumFlow;
@@ -436,13 +701,80 @@
     assert(s.prompt.choices.map((c) => c.text).join('|') === WSP.assetGoalChips.join('|'), '선택지가 이전 3개가 아님');
     assert(s.prompt.choices.length === 3 && s.prompt.typeText === LS.OPENING, '빈 곳 타이핑 문장');
     assert(!s.prompt.choices.some((c) => /목돈/.test(c.text)), '목돈 선택지가 있음');
-    const chip = s.prompt.choices[0];
+    /* 어떤 칩도 이전 룰베이스 상담(assetFlow)으로 넘기지 않는다. 세 칩은 각각 아래 별도 테스트에서 이 채팅 안에서 이어 간다 */
+    assert(!WSP.app.session.asset, '이전 상담이 열려 있음');
+  });
+
+  t('첫 질문의 결혼 자금 칩은 목표를 다시 묻지 않고 목돈 채팅에서 바로 판단한다', async () => {
+    fresh();
+    setMoney(3500000, 2100000, 0);
+    const L = WSP.lumpsumFlow;
+    const S0 = WSP.lumpsumScript;
+    assert(L.startNew(), '목돈 상담 시작');
+    const chip = S0.introChoices().find((c) => /결혼/.test(c.text));
+    assert(chip, '결혼 자금 칩이 없음');
     await L.accept(chip.text, chip.id);
-    await WSP.assetFlow.setGoal('');
-    assert(WSP.app.session.lumpsum === null && WSP.app.fsms.lumpsum.state === 'IDLE', '목돈 채팅이 닫히지 않음');
-    const a = WSP.app.session.asset;
-    assert(a && a.goalText === chip.text && a.purpose === 'INVEST', '이전 상담 목표 ' + (a && a.purpose));
-    assert(WSP.app.session.chatCarry === undefined, '대화 이어받기 없음');
+    const s = WSP.app.session.lumpsum;
+    assert(s && !WSP.app.session.asset, '이전 상담으로 넘어감');
+    assert(s.goal && s.goal.amount === 30000000 && s.goal.months === 36, '목표 ' + JSON.stringify(s.goal));
+    assert(WSP.app.fsms.lumpsum.state === 'DEBT_CHECK', '상태 ' + WSP.app.fsms.lumpsum.state);
+    const all = s.chat.map((m) => m.text || '').join('\n');
+    assert(!/목돈 목표가 얼마인가요/.test(all), '목표를 다시 물음');
+    assert(/바로 계산해 볼게요/.test(all) && /주식 투자도 해 보고 싶으세요/.test(all), '분석 뒤 바로 판단 ' + all);
+    assert(/결혼 자금을 준비하시는군요/.test(all), '결혼을 받아 주지 않음 ' + all);
+    const info = WSP.goalInfo.describe({ lumpsum: s, lumpsumState: WSP.app.fsms.lumpsum.state });
+    assert(info.rows[0].value === '결혼 자금 마련', '목표 이름 ' + info.rows[0].value);
+    assertClean(all);
+    /* 금액만 말하면 기간을 3년으로 가정하고, 가정했다고 말한다 */
+    fresh();
+    setMoney(3500000, 2100000, 0);
+    L.startNew();
+    await L.accept('결혼 자금 3천만원을 모으는 데 얼마나 부족한가요?');
+    const s2 = WSP.app.session.lumpsum;
+    assert(s2.goal && s2.goal.amount === 30000000 && s2.goal.months === 36 && s2.goal.assumed, '금액만 말한 목표 ' + JSON.stringify(s2.goal));
+    assert(/기간은 3년으로 보고/.test(s2.chat.map((m) => m.text || '').join('\n')), '가정했다는 말이 없음');
+  });
+
+  t('첫 질문의 비상자금 칩은 점검 결과를 말하고 목돈 마련도 볼지 묻는다', async () => {
+    fresh();
+    setMoney(3500000, 2100000, 0);
+    const L = WSP.lumpsumFlow;
+    const S0 = WSP.lumpsumScript;
+    const chipOf = () => S0.introChoices().find((c) => /비상자금/.test(c.text));
+    assert(L.startNew(), '목돈 상담 시작');
+    await L.accept(chipOf().text, chipOf().id);
+    let s = WSP.app.session.lumpsum;
+    assert(s && !WSP.app.session.asset, '이전 상담으로 넘어감');
+    assert(WSP.app.fsms.lumpsum.state === 'GOAL' && s.intent === 'EMERGENCY', '상태 ' + WSP.app.fsms.lumpsum.state + ' / ' + s.intent);
+    assert(s.prompt.choices.map((c) => c.id).join('|') === 'em-yes|em-no', '선택지 ' + s.prompt.choices.map((c) => c.id));
+    let all = s.chat.map((m) => m.text || '').join('\n');
+    assert(/예금이 생활비 4개월치예요/.test(all) && /충분한 편/.test(all) && /목돈 마련도 같이 볼까요/.test(all), '점검 문장 ' + all);
+    assert(!/목돈 목표가 얼마인가요/.test(all), '목표를 먼저 물음');
+    assert(WSP.goalInfo.describe({ lumpsum: s, lumpsumState: 'GOAL' }).rows.map((r) => r.label).join('|') === '목표|비상자금', '패널 줄');
+    assertClean(all);
+    /* 예: 목돈 마련도 보면 목표를 묻는 평소 흐름으로 이어진다 */
+    await L.accept(S0.EMERGENCY_CHOICES[0].text, 'em-yes');
+    assert(WSP.app.fsms.lumpsum.state === 'GOAL' && s.intent === '' && s.goalKind === 'LUMP_SUM', '예 뒤 상태');
+    assert(s.prompt.choices.some((c) => c.id === 'goal-100'), '목표 선택지가 나오지 않음');
+    assert(/목돈 목표가 얼마인가요/.test(s.chat[s.chat.length - 1].text), '목표 질문');
+    /* 아니요: 여기서 마친다 */
+    fresh();
+    setMoney(3500000, 2100000, 0);
+    L.startNew();
+    await L.accept(chipOf().text, chipOf().id);
+    await L.accept(S0.EMERGENCY_CHOICES[1].text, 'em-no');
+    assert(WSP.app.fsms.lumpsum.state === 'CLOSED', '아니요 뒤 상태 ' + WSP.app.fsms.lumpsum.state);
+    /* 예금이 모자라면 채우는 기간을 계산해 말한다 */
+    fresh();
+    setMoney(3500000, 2100000, 0);
+    store.update((d) => {
+      d.finance.items.liquidAssets.value = 1000000;
+    }, '[자가 테스트] 예금 100만원');
+    L.startNew();
+    await L.accept(chipOf().text, chipOf().id);
+    s = WSP.app.session.lumpsum;
+    all = s.chat.map((m) => m.text || '').join('\n');
+    assert(/아직 부족해요/.test(all) && /매달 약 98만원씩 예금에 모으면 6개월이면 채워져요/.test(all), '부족 점검 ' + all);
   });
 
   t('월 여유 0원 이하: 소비 분석 연동 줄이기 계획 → 칩 → 저장 → 종료', async () => {
@@ -458,7 +790,7 @@
     assert(kindsOf(row) === 'text,figures,text,steps,details,tags,text,figures,text', '지출 계획 블록 순서 ' + kindsOf(row));
     const figs = row.blocks[1].figures;
     assert(!/라고 하셨군요|그 문장 기준|맞춰 봤어요/.test(row.text), '되묻기 문장');
-    assert(figs[2].value === '-10만원', '음수 여유 표기 ' + figs[2].value);
+    assert(figs[2].value === '약 10만원 부족', '음수 여유 표기 ' + figs[2].value);
     assert(/자산·소비에서 분석한 최근 3개월/.test(row.blocks[2].text), '출처 문장');
     assert(row.blocks[3].items.length === 3, '계획 진행 단계');
     assert(row.blocks[4].categories.length === 6 && row.blocks[4].insight.source === LA.INSIGHT_SOURCE, '소비 막대와 출처');
@@ -471,7 +803,7 @@
     assert(plan.enough === (plan.after > 0), '충분 여부');
     const body = row.blocks[6].text;
     assert(/한 달에 .+ 정도/.test(body) && !/^- /m.test(body) && /고정비/.test(body), '대화체 계획 ' + body);
-    assert(row.blocks[7].figures.map((f) => f.label).join('|') === '줄이기 전 월 여유|줄인 뒤 월 여유' && row.blocks[7].figures[1].value === LA.manSigned(plan.after), '전후 카드');
+    assert(row.blocks[7].figures.map((f) => f.label).join('|') === '줄이기 전 월 여유|줄인 뒤 월 여유' && row.blocks[7].figures[1].value === LA.about(plan.after), '전후 카드');
     assert(s.prompt.choices.map((c) => c.id).join('|') === 'spend-view|spend-save', '칩 2개');
     assert(!/새 상담을 시작하면/.test(row.text), '옛 마무리 문장');
 
@@ -516,6 +848,7 @@
     await L.accept(LS.TYPED.PROFILING);
     dup('손실');
     await L.accept(LS.TYPED.LOSS);
+    await keepShare();
     s = WSP.app.session.lumpsum;
     assert(WSP.app.fsms.lumpsum.state === 'RECOMMEND' && s.advice.profile.id === 'NEUTRAL', '직접 입력한 성향 ' + s.advice.profile.id);
     dup('상품');
@@ -554,15 +887,16 @@
     assert(row.blocks[0].text === '월급과 지출을 분석해볼게요.', '분석 첫 문장');
     assert(row.blocks[1].items.length === 3, '진행 단계 3개');
     assert(row.blocks[2].label === '내 소비 자세히 보기' && row.blocks[2].categories.length === 6 && row.open === false, '소비 드롭다운');
-    assert(row.blocks[3].figures.map((f) => f.label + f.value).join('|') === '평균 수입' + man(3500000) + '|평균 지출' + man(2100000), '수입·지출 카드');
+    assert(row.blocks[3].figures.map((f) => f.label + f.value).join('|') === '평균 수입' + WSP.lumpsumAdvisor.about(3500000) + '|평균 지출' + WSP.lumpsumAdvisor.about(2100000), '수입·지출 카드');
     assert(row.blocks[4].figures.map((f) => f.label).join('|') === '월평균 여유 자금|예적금 및 현금', '여유·예적금 카드');
-    assert(row.blocks[4].figures[0].value === man(1400000) && row.blocks[4].figures[1].value === man(s.snap.deposit), '여유·예적금 숫자');
+    assert(row.blocks[4].figures[0].value === WSP.lumpsumAdvisor.about(1400000) && row.blocks[4].figures[1].value === WSP.lumpsumAdvisor.about(s.snap.deposit), '여유·예적금 숫자');
     const last = row.blocks[5].text;
-    assert(last === '매달 남는 돈은 140만원이에요.\n\n**목돈 목표가 얼마인가요?**', '부채 없음 마무리 ' + last);
+    assert(last === '매달 남는 돈은 약 140만원이에요.\n\n**목돈 목표가 얼마인가요?**', '부채 없음 마무리 ' + last);
     assert(!/월급과 지출부터|계좌 내역을 읽어/.test(row.text), '무작위 첫 문장');
     await L.accept(LA.GOALS['goal-100'].text, 'goal-100');
     row = s.chat.filter((m) => m.role === 'ai').pop();
-    const order = s.advice.decisionId === 'MIX' ? 'text,figures,text,text,figures,link' : 'text,figures';
+    /* MIX이고 투자로도 어려우면: 결론 / 카드 / 소비를 줄이면 / 제안 드롭다운 / 소비 분석 버튼 / 투자로도 어렵다 / 질문 */
+    const order = s.advice.decisionId === 'MIX' ? 'text,figures,text,details,link,text,text' : 'text,figures,text';
     assert(kindsOf(row) === order, '판단 블록 순서 ' + kindsOf(row));
     assert(!/라고 하셨군요|그 문장 기준|맞춰 봤어요/.test(row.text), '되묻기 문장');
     assert(row.blocks[1].figures.map((f) => f.value).join('|') === s.advice.figures.decision.map((f) => f.value).join('|'), '판단 카드 숫자');
@@ -575,7 +909,7 @@
     s = WSP.app.session.lumpsum;
     row = s.chat.filter((m) => m.role === 'ai').pop();
     const pay = LA.debtPayment(30000000);
-    const want = '매달 남는 돈은 140만원이고, 부채 상환을 제외하면 매달 평균 ' + man(1400000 - pay) + ' 남아요.';
+    const want = '매달 남는 돈은 약 140만원이고, 부채 상환(월 ' + WSP.lumpsumAdvisor.about(pay) + ')을 빼면 매달 평균 ' + WSP.lumpsumAdvisor.about(1400000 - pay) + ' 남아요.';
     assert(row.blocks[5].text.indexOf(want) === 0, '부채 마무리 ' + row.blocks[5].text);
     assertClean(s.chat.map((m) => m.text).join('\n'));
   });
@@ -597,23 +931,27 @@
     assert(labels(d) === '목표', '첫 문장 전');
     await L.accept(WSP.lumpsumScript.OPENING);
     d = G.describe({ lumpsum: s, lumpsumState: st() });
-    assert(labels(d) === '목표|목표 금액·기간|부채|투자 경험|손실 감내|투자 성향' && val(d, '목표') === '목돈 마련', '목돈 마련 줄 ' + labels(d));
+    assert(labels(d) === '목표|목표 금액·기간|투자 경험|손실 감내|투자 성향' && val(d, '목표') === '목돈 마련', '목돈 마련 줄 ' + labels(d));
     assert(val(d, '투자 성향') === '아직 모름', '아직 모름');
     await L.accept(LA.GOALS['goal-100'].text, 'goal-100');
     assert(val(G.describe({ lumpsum: s, lumpsumState: st() }), '목표 금액·기간') === '3년 · 1억원', '금액·기간');
-    await L.accept(WSP.lumpsumScript.situationText(0));
-    assert(val(G.describe({ lumpsum: s, lumpsumState: st() }), '부채') === '없음', '부채 없음');
+    await L.accept(WSP.lumpsumScript.situationText());
+    assert(labels(G.describe({ lumpsum: s, lumpsumState: st() })).indexOf('부채') === -1, '알고 있는 정보에 부채 줄이 없어야 함');
     await L.accept(LA.EXPERIENCE['exp-1'].text, 'exp-1');
     await L.accept(LA.LOSS['loss-1'].text, 'loss-1');
+    await keepShare();
     d = G.describe({ lumpsum: s, lumpsumState: st() });
     assert(val(d, '투자 경험') === '소액 ETF 경험' && val(d, '손실 감내') === '길게 버틴다' && val(d, '투자 성향') === '중립', '답한 값 ' + JSON.stringify(d.rows));
     await L.accept('해외주식', 'prod-os');
     d = G.describe({ lumpsum: s, lumpsumState: st(), hasFxAccount: false });
     assert(val(d, '목표') === '해외주식 계좌 개설' && labels(d).indexOf('월 투자 참고 금액|해외 비중|해외 계좌') !== -1, '해외 계좌 줄 ' + labels(d));
-    assert(val(d, '월 투자 참고 금액') === '월 ' + WSP.utils.formatMan(s.advice.monthlyInvest) && val(d, '해외 비중') === s.advice.overseasShare + '%', '해외 값');
-    assert(val(G.describe({ lumpsum: s, lumpsumState: st(), applied: true }), '해외 계좌') === '신청 접수', '신청 접수');
+    assert(val(d, '월 투자 참고 금액') === '월 ' + WSP.lumpsumAdvisor.about(s.advice.monthlyInvest) && val(d, '해외 비중') === '100%' && val(d, '국내 비중') === undefined, '해외만 보면 해외 100% ' + JSON.stringify(d.rows));
+    assert(val(G.describe({ lumpsum: s, lumpsumState: st(), applied: true }), '해외 계좌') === '승인 대기', '승인 대기');
+    assert(val(G.describe({ lumpsum: s, lumpsumState: st(), applied: true, approved: true }), '해외 계좌') === '개설 완료', '개설 완료');
+    const bothInfo = G.describe({ lumpsum: Object.assign({}, s, { market: 'both' }), lumpsumState: st() });
+    assert(val(bothInfo, '국내 비중') === s.advice.domesticShare + '%' && val(bothInfo, '해외 비중') === s.advice.overseasShare + '%', '두 시장은 추천 비중 ' + JSON.stringify(bothInfo.rows));
     const dom = G.describe({ lumpsum: Object.assign({}, s, { goalKind: 'DOMESTIC_STOCK' }), lumpsumState: st() });
-    assert(val(dom, '목표') === '국내주식 투자 알아보기' && val(dom, '국내 비중') === s.advice.domesticShare + '%' && val(dom, '해외 비중') === undefined, '국내주식 줄');
+    assert(val(dom, '목표') === '국내주식 투자 알아보기' && val(dom, '국내 비중') === '100%' && val(dom, '해외 비중') === undefined, '국내만 보면 국내 100%');
     const lev = G.describe({ lumpsum: Object.assign({}, s, { goalKind: 'LEVERAGE' }), lumpsumState: st() });
     assert(/^연 \d/.test(val(lev, '필요한 연 수익')) && !/수익률/.test(JSON.stringify(lev)), '레버리지 줄');
 
@@ -623,8 +961,10 @@
     s = WSP.app.session.lumpsum;
     await L.accept(WSP.lumpsumScript.OPENING);
     await L.accept(LA.GOALS['goal-100'].text, 'goal-100');
-    await L.accept(WSP.lumpsumScript.situationText(30000000));
-    assert(/월 상환/.test(val(G.describe({ lumpsum: s, lumpsumState: st() }), '부채')), '부채 있음');
+    await L.accept(WSP.lumpsumScript.situationText());
+    const debtInfo = G.describe({ lumpsum: s, lumpsumState: st() });
+    assert(labels(debtInfo).indexOf('부채') === -1, '부채가 있어도 알고 있는 정보에 부채 줄 없음');
+    assert(WSP.lumpsumScript.situationText() === '투자에 더 집중하고 싶어요', '부채 언급 없는 입력 문장');
 
     fresh();
     setMoney(3500000, 3600000, 0);
@@ -697,6 +1037,14 @@
     assert(jf().state === 'READY_TO_APPLY', '준비 상태 ' + jf().state);
     await J().approve({ market: '미국', account: 'WON 통장', fxAccount: 'WON 외화통장(USD)' });
     assert(jf().state === 'COMPLETED', '결과 ' + jf().state);
+    assert(WSP.joinFlow.APPROVAL_WAIT_MS === 5000, '은행 승인 대기 시간 ' + WSP.joinFlow.APPROVAL_WAIT_MS);
+    const view = WSP.joinResult('join');
+    assert(view.title === '해외주식 계좌 개설이 완료됐어요' && /join-new/.test(view.foot) && /홈으로/.test(view.foot) && /승인/.test(view.extra), '개설 완료 화면 ' + view.title);
+    assert(!/접수됐어요/.test(view.title + view.desc), '접수 문구가 남음');
+    WSP.actions['join-new']();
+    assert(WSP.app.session.openedNotice && WSP.app.session.openedNotice.productId === SC.DEMO.productId, '홈 완료 안내 ' + JSON.stringify(WSP.app.session.openedNotice));
+    WSP.actions['opened-dismiss']();
+    assert(WSP.app.session.openedNotice === null, '완료 안내 닫기');
     const s = store.getState();
     assert(SC.DEMO.stages.every((st) => st.facts.every((k) => s.facts[k] === true)), '진행 단계 사실 미충족');
   });
@@ -1076,7 +1424,7 @@
       WSP.FSM_DEFS[kind].edges.forEach((e) => {
         const k = e[0] + '|' + e[1];
         if (diagramKeys.has(k)) return;
-        assert(/^(P[1-8]|S)$/.test(e[3]), kind + ' 원본에 없는데 제안·안전 전이로 표시되지 않음: ' + k + ' (' + e[3] + ')');
+        assert(/^(P[1-9]|S)$/.test(e[3]), kind + ' 원본에 없는데 제안·안전 전이로 표시되지 않음: ' + k + ' (' + e[3] + ')');
       });
     });
   });

@@ -558,7 +558,7 @@
     sayUser(alt.label);
     const keys = Object.keys(alt.apply);
     if (!keys.length) {
-      await sayBot('비상자금부터 채우는 건 상담 연결에서 이어서 정하면 돼요.');
+      await sayBot(alt.message || '비상자금부터 채우는 건 상담 연결에서 이어서 정하면 돼요.');
       return;
     }
     keys.forEach((k) => AA.setItem(a.info, k, alt.apply[k], 'STATED', '조정안 선택: ' + alt.label));
@@ -846,7 +846,8 @@
       if (!root || !root.classList.contains('is-ready')) return;
       const text = root.querySelector('.fortune__text');
       const line = text ? text.textContent.trim() : '';
-      if (!/[?&]legacy=1(?:&|$)/.test(location.search) && WSP.lumpsumFlow) return WSP.lumpsumFlow.open();
+      /* 쿠키의 물어보기는 항상 새 채팅을 연다. 진행 중이던 상담은 버린다 */
+      if (!/[?&]legacy=1(?:&|$)/.test(location.search) && WSP.lumpsumFlow) return WSP.lumpsumFlow.startFresh(line);
       if (!freshConsult()) return openConsult();
       return sendCookie(line);
     },

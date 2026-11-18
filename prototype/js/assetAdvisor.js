@@ -234,6 +234,8 @@
   // 부동소수 오차(1400000 × 0.7 = 979999.99…)로 만원 단위가 한 칸 밀리지 않도록 원 단위로 먼저 맞춘다
   const roundDown = (v) => Math.floor(Math.round(v) / 10000) * 10000;
   const roundUp = (v) => Math.ceil(Math.round(v) / 10000) * 10000;
+  /** 화면에 보일 큰 금액은 만원 단위로 맞춘다 (예: 30,262,400원 → 3,026만원) */
+  const roundMan = (v) => Math.round(Math.max(0, v || 0) / 10000) * 10000;
 
   function computeMetrics(info) {
     const P = SC.POLICY;
@@ -334,7 +336,14 @@
       alternatives.push({ id: 'LOWER_GOAL', label: '목표 금액을 ' + withRo(man(lowered)) + ' 줄일게요', detail: '지금 여유로 기간 안에 모을 수 있는 금액이에요', apply: { goalAmount: lowered } });
     }
     if (b.emergencyMonths.value != null && b.emergencyMonths.value < SC.POLICY.emergencyMonths) {
-      alternatives.push({ id: 'EMERGENCY_FIRST', label: '비상자금부터 채울게요', detail: '생활비 ' + SC.POLICY.emergencyMonths + '개월치가 기준인데, 지금은 ' + b.emergencyMonths.text + '치예요', apply: {} });
+      /* 비상자금을 채우는 기간: 남겨 둘 금액과 지금 예금의 차이를 월 적립 여력으로 나눈다 */
+      const gap = Math.max(0, (b.reserve.value || 0) - (val(info, 'liquidAssets') || 0));
+      const save = b.capacity.value || 0;
+      const fill =
+        save > 0 && gap > 0
+          ? '매달 ' + man(save) + '씩 예금에 모으면 ' + Math.ceil(gap / save) + '개월이면 생활비 ' + SC.POLICY.emergencyMonths + '개월치가 채워져요.'
+          : '지금 여유로는 비상자금을 채우기 어려워요. 지출을 먼저 줄여 보세요.';
+      alternatives.push({ id: 'EMERGENCY_FIRST', label: '비상자금부터 채울게요', detail: '생활비 ' + SC.POLICY.emergencyMonths + '개월치가 기준인데, 지금은 ' + b.emergencyMonths.text + '치예요', apply: {}, message: fill });
     }
     const uncertain = Object.keys(info.items).filter((k) => p.critical.concat(p.important).indexOf(k) !== -1 && (!known(info, k) || (info.items[k].source !== 'STATED' && info.items[k].source !== 'BANK')));
     const invest = purposeId === 'INVEST';
@@ -399,7 +408,7 @@
     if (basis.months) figs.push({ label: '모으는 기간', value: display('goalMonths', basis.months), note: '', tone: '' });
     if (b.expectedAmount.value != null) {
       const short = b.target.value != null ? b.target.value - b.expectedAmount.value : null;
-      figs.push({ label: '기간이 끝나면', value: '약 ' + man(b.expectedAmount.value), note: short > 0 ? '목표보다 ' + man(short) + ' 적어요' : '', tone: short > 0 ? 'warning' : '' });
+      figs.push({ label: '기간이 끝나면', value: '약 ' + man(roundMan(b.expectedAmount.value)), note: short > 0 ? '목표보다 ' + man(roundMan(short)) + ' 적어요' : '', tone: short > 0 ? 'warning' : '' });
     }
     return figs;
   }

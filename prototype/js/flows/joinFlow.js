@@ -23,6 +23,8 @@
   const S = () => WSP.app.session.join;
 
   const SCREENS = ['join', 'apply', 'apply-result', 'support', 'home'];
+  /** 해외주식 계좌 개설: 접수 뒤 은행 승인을 기다리는 시간(ms). 발표용으로 길게 둔다 */
+  const APPROVAL_WAIT_MS = 5000;
   const AUTO = ['CHECKING', 'CLARIFYING', 'ROUTE_CHECK', 'RECHECKING', 'APPLYING', 'VERIFYING', 'TASK_OPEN', 'OPTIONS_READY', 'REMAINING', 'INVESTIGATING'];
 
   function fresh(productId, ctx) {
@@ -189,8 +191,13 @@
     if (!f.can('NEW_CASE')) return;
     const j = S();
     if (j && j.metrics.endedAt) WSP.app.session.lastMetrics.join = j.metrics;
+    /* 해외주식 계좌 개설이 끝난 뒤 홈으로 돌아오면 홈에서 완료 안내를 보여 준다 */
+    const prod = j ? SC.getProduct(j.productId) : null;
+    const opened = f.state === 'COMPLETED' && prod && prod.kind === 'BROKERAGE';
     f.transition('NEW_CASE');
     WSP.app.session.join = null;
+    WSP.app.session.openedNotice = opened ? { productId: j.productId, appId: j.appId, at: Date.now() } : null;
+    WSP.app.save();
     UI().navigate('home', {}, { resetHistory: true, back: true });
   }
 
@@ -745,7 +752,8 @@
 
   async function stepVerify(ep) {
     const j = S();
-    await WSP.utils.sleep(2800 * bank.getLatencyScale());
+    /* 해외주식 계좌는 은행 승인까지 약 5초 기다린다. 그동안 승인 대기 화면이 보인다 */
+    await WSP.utils.sleep((product().kind === 'BROKERAGE' ? APPROVAL_WAIT_MS : 2800) * bank.getLatencyScale());
     if (stale(ep)) return;
     const r = await bank.getApplicationResult(j.appId);
     if (stale(ep)) return;
@@ -827,6 +835,7 @@
   }
 
   WSP.joinFlow = {
+    APPROVAL_WAIT_MS: APPROVAL_WAIT_MS,
     start: start,
     agree: agree,
     exit: exit,

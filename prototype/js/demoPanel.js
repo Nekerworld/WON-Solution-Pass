@@ -154,8 +154,10 @@
     };
   }
 
-  function hintLines() {
+  /** 고객 정보 카드 아래 문구. 완료된 카드(compact)에는 힌트와 "새 채팅부터 반영돼요"를 빼고 말한 내용만 남긴다 */
+  function hintLines(compact) {
     const hint = WSP.lumpsumFlow && WSP.lumpsumFlow.hint ? WSP.lumpsumFlow.hint() : { active: false, line: '', spoken: '', decision: '' };
+    if (compact) return hint.spoken ? '<p class="dp-spoken">' + esc(hint.spoken) + '</p>' : '';
     return (
       (hint.active ? '<p class="dp-hint">' + esc(hint.line) + '</p>' : '') +
       (hint.spoken ? '<p class="dp-spoken">' + esc(hint.spoken) + '</p>' : '') +
@@ -177,7 +179,7 @@
         '</h2><ul class="dp-sum">' +
         sum.lines.map((l) => '<li>' + esc(l) + '</li>').join('') +
         '</ul><button type="button" class="dp-edit" data-dp="persona-edit" aria-expanded="false">바꾸기<i class="dp-edit__chev" aria-hidden="true"></i></button>' +
-        hintLines() +
+        hintLines(true) +
         '</section>'
       );
     }
@@ -211,21 +213,50 @@
       asset: sess.asset,
       assetState: WSP.app.fsms.asset.state,
       applied: apps.some((a) => a.status === 'PENDING' || a.status === 'UNKNOWN' || a.status === 'SUCCESS'),
+      approved: apps.some((a) => a.status === 'SUCCESS') && ['APPLYING', 'VERIFYING'].indexOf(WSP.app.fsms.join.state) === -1,
       hasFxAccount: s.facts.hasFxAccount,
     });
+    const marks = markNew(info.rows);
+    /* 첫 줄(목표)은 크게, 나머지 세부 목표는 조금 작게 두 열로 보여 준다 */
+    const head = marks.filter((m) => m.c.label === '목표');
+    const subs = marks.filter((m) => m.c.label !== '목표');
+    const cell = (m, extra) => {
+      const c = m.c;
+      return '<div class="dp-num' + extra + (m.on ? ' is-new' : '') + '"><span>' + (m.on ? '<b class="dp-new">새 정보</b>' : '') + esc(c.label) + '</span><strong>' + esc(c.value) + '</strong></div>';
+    };
     return (
-      '<section class="dp-card"><h2>해결패스가 알고 있는 정보</h2><div class="dp-nums dp-nums--lines">' +
-      info.rows
-        .map((c) => '<div class="dp-num"><span>' + esc(c.label) + '</span><strong>' + esc(c.value) + '</strong></div>' + (c.note ? '<p class="dp-note">“' + esc(c.note) + '”</p>' : ''))
-        .join('') +
-      '</div></section>'
+      '<section class="dp-card dp-card--known"><h2>해결패스가 알고 있는 정보</h2>' +
+      '<div class="dp-nums dp-nums--lines">' + head.map((m) => cell(m, '')).join('') + '</div>' +
+      (subs.length ? '<div class="dp-nums dp-nums--sub">' + subs.map((m) => cell(m, ' dp-num--sub')).join('') + '</div>' : '') +
+      '</section>'
     );
+  }
+
+  /* 새 정보가 들어온 줄을 잠깐 강조한다: 빈 값(아직 모름 등)이 값으로 바뀌거나, 값이 바뀌었을 때 */
+  const BLANK_VALUES = [WSP.goalInfo.UNKNOWN, WSP.goalInfo.DECLINED, WSP.goalInfo.SKIPPED, '아직 없음'];
+  const HIGHLIGHT_MS = 2600;
+  let knownValues = null;
+  const highlightAt = {};
+
+  function markNew(rows) {
+    const now = Date.now();
+    const next = {};
+    rows.forEach((c) => {
+      next[c.label] = c.value;
+      if (knownValues && BLANK_VALUES.indexOf(c.value) === -1 && knownValues[c.label] !== c.value) {
+        highlightAt[c.label] = now;
+        setTimeout(scheduleSync, HIGHLIGHT_MS + 50);
+      }
+    });
+    knownValues = next;
+    return rows.map((c) => ({ c: c, on: highlightAt[c.label] !== undefined && now - highlightAt[c.label] < HIGHLIGHT_MS }));
   }
 
   function sync() {
     const s = store.getState();
-    $('#dp-left').innerHTML = customerCard(s) + situation(s);
-    $('#dp-right').innerHTML = '';
+    /* 달라진 줄만 고친다. 통째로 바꾸면 카드가 깜빡이고 강조 애니메이션이 다시 시작한다 */
+    WSP.ui.morphInner($('#dp-left'), customerCard(s) + situation(s));
+    WSP.ui.morphInner($('#dp-right'), '');
   }
 
   let raf = 0;

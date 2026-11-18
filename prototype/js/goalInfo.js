@@ -21,6 +21,7 @@
     OVERSEAS_ACCOUNT: '해외주식 계좌 개설',
     DOMESTIC_STOCK: '국내주식 투자 알아보기',
     LEVERAGE: '레버리지 상품 알아보기',
+    EMERGENCY: '비상자금 점검',
   };
 
   const PROFILE_LABEL = { STABLE: '안정', NEUTRAL: '중립', ACTIVE: '적극' };
@@ -42,17 +43,24 @@
     return (m % 12 === 0 ? m / 12 + '년' : m + '개월') + ' · ' + U.formatMan(goal.amount);
   }
 
-  function lumpRows(s, state, applied, hasFx) {
+  function lumpRows(s, state, applied, hasFx, approved) {
     const kind = s.goalKind || '';
-    const sentence = (s.chat || []).filter((m) => m.role === 'user')[0];
-    const note = sentence ? sentence.text : '';
     if (!kind) return { flow: 'lumpsum', goalId: '', rows: [row('목표', '아직 없음')] };
     const ended = state === 'CLOSED' || state === 'SPEND_PLAN';
     const blank = ended ? SKIPPED : UNKNOWN;
-    const rows = [row('목표', KIND_LABEL[kind], note)];
-    const snap = s.snap || {};
+    const rows = [row('목표', (kind === 'LUMP_SUM' && s.purposeLabel) || KIND_LABEL[kind])];
+    /* 비상자금만 보는 동안은 목표 금액·성향을 묻지 않으므로 예금이 생활비 몇 개월치인지만 보여 준다 */
+    if (s.intent === 'EMERGENCY') {
+      const sn = s.snap || {};
+      if (sn.expense > 0) rows.push(row('비상자금', '생활비 ' + Math.round((sn.deposit / sn.expense) * 10) / 10 + '개월치', '기준 3개월'));
+      return { flow: 'lumpsum', goalId: kind, rows: rows };
+    }
+    /* 해외주식 칩으로 바로 계좌 개설로 간 채팅은 목표·성향을 묻지 않으므로 계좌 상태만 남긴다 */
+    if (s.intent === 'OVERSEAS') {
+      rows.push(row('해외 계좌', applied ? (approved ? '개설 완료' : '승인 대기') : hasFx === true ? '개설 중' : '없음'));
+      return { flow: 'lumpsum', goalId: kind, rows: rows };
+    }
     rows.push(row('목표 금액·기간', s.goal ? periodText(s.goal) : blank));
-    rows.push(row('부채', s.situationDone ? (snap.debt > 0 ? U.formatMan(snap.debt) + ' · 월 상환 ' + U.formatMan(snap.debtPayment) : '없음') : blank));
     const prof = s.expText && s.lossText ? LA.inferRiskProfile(s.expText, s.lossText) : null;
     rows.push(row('투자 경험', s.expText ? EXP_LABEL[LA.inferRiskProfile(s.expText, '').experience] : blank));
     rows.push(row('손실 감내', s.lossText ? LOSS_LABEL[LA.inferRiskProfile('', s.lossText).loss] : blank));
@@ -60,15 +68,19 @@
     if (kind !== 'LUMP_SUM') {
       const a = s.advice;
       if (kind === 'LEVERAGE') {
-        rows.push(row('월 투자 참고 금액', a ? '월 ' + U.formatMan(a.monthlyInvest) : blank));
+        rows.push(row('월 투자 참고 금액', a ? '월 ' + LA.about(a.monthlyInvest) : blank));
         rows.push(row('필요한 연 수익', a ? '연 ' + pct(a.yieldRate) : blank));
       } else if (kind === 'DOMESTIC_STOCK') {
-        rows.push(row('월 투자 참고 금액', a ? '월 ' + U.formatMan(a.monthlyInvest) : blank));
-        rows.push(row('국내 비중', a ? a.domesticShare + '%' : blank));
+        rows.push(row('월 투자 참고 금액', a ? '월 ' + LA.about(a.monthlyInvest) : blank));
+        rows.push(row('국내 비중', a ? '100%' : blank));
       } else {
-        rows.push(row('월 투자 참고 금액', a ? '월 ' + U.formatMan(a.monthlyInvest) : blank));
-        rows.push(row('해외 비중', a ? a.overseasShare + '%' : blank));
-        rows.push(row('해외 계좌', applied ? '신청 접수' : hasFx === true ? '있음' : '없음'));
+        rows.push(row('월 투자 참고 금액', a ? '월 ' + LA.about(a.monthlyInvest) : blank));
+        /* 해외만 보면 해외 100%, 두 시장을 모두 보면 추천 비중으로 나눈다 */
+        if (s.market === 'both') {
+          rows.push(row('국내 비중', a ? a.domesticShare + '%' : blank));
+          rows.push(row('해외 비중', a ? a.overseasShare + '%' : blank));
+        } else rows.push(row('해외 비중', a ? '100%' : blank));
+        rows.push(row('해외 계좌', applied ? (approved ? '개설 완료' : '승인 대기') : hasFx === true ? '개설 중' : '없음'));
       }
     }
     return { flow: 'lumpsum', goalId: kind, rows: rows };
@@ -144,7 +156,7 @@
    */
   function describe(input) {
     const i = input || {};
-    if (i.lumpsum && i.lumpsumState && i.lumpsumState !== 'IDLE') return lumpRows(i.lumpsum, i.lumpsumState, !!i.applied, i.hasFxAccount);
+    if (i.lumpsum && i.lumpsumState && i.lumpsumState !== 'IDLE') return lumpRows(i.lumpsum, i.lumpsumState, !!i.applied, i.hasFxAccount, !!i.approved);
     if (i.asset) return assetRows(i.asset);
     return { flow: 'none', goalId: '', rows: [row('목표', '아직 없음')] };
   }

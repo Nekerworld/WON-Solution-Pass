@@ -155,7 +155,7 @@
 
   /** 챗봇 아바타: 우리은행 캐릭터 대신 단순한 말풍선 얼굴 */
   const BOT_FACE =
-    '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="9" width="22" height="17" rx="8" fill="#e8f1fe"/><rect x="5" y="9" width="22" height="17" rx="8" fill="none" stroke="#2488f3" stroke-width="1.6"/><circle cx="12.5" cy="17.5" r="1.8" fill="#2488f3"/><circle cx="19.5" cy="17.5" r="1.8" fill="#2488f3"/><path d="M16 9V5.5" stroke="#2488f3" stroke-width="1.6" stroke-linecap="round"/><circle cx="16" cy="4.5" r="1.6" fill="#2488f3"/></svg>';
+    '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 12V5" stroke="#2488f3" stroke-width="2.2" stroke-linecap="round"/><circle cx="16" cy="3.6" r="2.6" fill="#2488f3"/><rect x="4.5" y="12" width="23" height="17" rx="7" fill="#e8f1fe" stroke="#2488f3" stroke-width="1.8"/><circle cx="12.2" cy="20.5" r="2" fill="#2488f3"/><circle cx="19.8" cy="20.5" r="2" fill="#2488f3"/></svg>';
 
   function renderMessage(m, rise) {
     const fresh = rise ? ' is-in' : '';
@@ -388,6 +388,83 @@
   const SCREEN_IDS = Object.freeze(['home', 'products', 'product-list', 'product', 'menu', 'join-consent', 'join', 'apply', 'apply-result', 'support', 'direct', 'asset-consent', 'asset', 'explore', 'lumpsum', 'spend']);
   const SCREENS = {};
 
+  /* ==================================================================
+   * 제자리 갱신(morph): 새 HTML과 달라진 부분만 고친다.
+   * innerHTML로 통째로 바꾸면 이미 보이던 말풍선·카드가 지워졌다 다시 생겨 깜빡이고,
+   * 진행 중이던 애니메이션도 처음부터 다시 시작한다. 같은 자리의 같은 요소는 그대로 둔다.
+   * ================================================================== */
+  function morphKey(el) {
+    const d = el.dataset || {};
+    return el.nodeName + '|' + (d.mid || d.bi || d.id || '') + '|' + ((el.classList && el.classList[0]) || '');
+  }
+
+  function morphAttrs(from, to, keepNew) {
+    for (let i = from.attributes.length - 1; i >= 0; i--) {
+      const name = from.attributes[i].name;
+      if (!to.hasAttribute(name)) from.removeAttribute(name);
+    }
+    for (let i = 0; i < to.attributes.length; i++) {
+      const a = to.attributes[i];
+      let value = a.value;
+      /* 처음 나올 때의 애니메이션 표시는 끝까지 둔다. 지우면 재생 중에 멈추고 튄다 */
+      if (a.name === 'class' && keepNew && from.classList.contains('is-new') && !to.classList.contains('is-new')) value += ' is-new';
+      if (from.getAttribute(a.name) !== value) from.setAttribute(a.name, value);
+    }
+  }
+
+  function morphNode(from, to, keepNew) {
+    if (from.nodeType !== 1) {
+      if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue;
+      return;
+    }
+    morphAttrs(from, to, keepNew);
+    if (from.nodeName === 'TEXTAREA') {
+      if (from.value !== to.value) from.value = to.value;
+      return;
+    }
+    if (from.nodeName === 'INPUT') {
+      if (from.value !== to.value) from.value = to.value;
+      if (from.checked !== to.checked) from.checked = to.checked;
+      return;
+    }
+    morphChildren(from, to, keepNew);
+  }
+
+  function sameSlot(a, b) {
+    if (a.nodeType !== b.nodeType) return false;
+    if (a.nodeType !== 1) return true;
+    return morphKey(a) === morphKey(b);
+  }
+
+  function morphChildren(from, to, keepNew) {
+    let f = from.firstChild;
+    let t = to.firstChild;
+    while (t) {
+      const nextT = t.nextSibling;
+      if (!f) {
+        from.appendChild(t);
+      } else if (sameSlot(f, t)) {
+        morphNode(f, t, keepNew);
+        f = f.nextSibling;
+      } else {
+        from.insertBefore(t, f);
+      }
+      t = nextT;
+    }
+    while (f) {
+      const next = f.nextSibling;
+      from.removeChild(f);
+      f = next;
+    }
+  }
+
+  /** el의 내용을 html과 같게 만든다. 이미 같은 부분은 건드리지 않는다 */
+  function morphInner(el, html, opts) {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    morphChildren(el, tpl.content, !!(opts && opts.keepNew));
+  }
+
   function registerScreen(id, def) {
     if (SCREEN_IDS.indexOf(id) === -1) {
       console.warn('[WSP UI] 허용목록에 없는 화면 등록 거부: ' + id);
@@ -489,7 +566,9 @@
     const active = document.activeElement && currentEl.contains(document.activeElement) && document.activeElement.id ? document.activeElement : null;
     const keep = {};
     currentEl.querySelectorAll('input[id]').forEach((inp) => (keep[inp.id] = inp.value));
-    currentEl.innerHTML = html;
+    /* morph 화면은 달라진 부분만 고친다 (대화처럼 계속 쌓이는 화면이 깜빡이지 않도록) */
+    if (def.morph) morphInner(currentEl, html, { keepNew: true });
+    else currentEl.innerHTML = html;
     current.params = params;
     Object.keys(keep).forEach((k) => {
       const inp = currentEl.querySelector('#' + k);
@@ -865,6 +944,7 @@
     chatIntro: chatIntro,
     bottomNav: bottomNav,
     scrollToLatest: scrollToLatest,
+    morphInner: morphInner,
     contextCard: contextCard,
     chatInput: chatInput,
     registerScreen: registerScreen,

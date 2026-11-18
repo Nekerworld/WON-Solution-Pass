@@ -16,6 +16,17 @@
   }
 
   /** 소비 막대와 패턴 태그는 소비 분석 화면(spend.js)과 같은 모양을 쓴다 */
+  /** "지출 줄이기 제안" 드롭다운 안: 항목, 줄이는 돈, 이유 */
+  function cutList(list) {
+    return (
+      '<ul class="cut-list">' +
+      list
+        .map((c) => '<li><div class="cut-list__row"><span>' + esc(c.label) + '</span><b>월 ' + esc(WSP.utils.formatMan(c.saved)) + '</b></div><p>' + esc(c.reason) + '</p></li>')
+        .join('') +
+      '</ul>'
+    );
+  }
+
   function stack(list, fresh, insight) {
     return WSP.spendView.stack(list, { fresh: fresh, insight: insight });
   }
@@ -34,7 +45,7 @@
   }
 
   const FACE =
-    '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="9" width="22" height="17" rx="8" fill="#e8f1fe"/><rect x="5" y="9" width="22" height="17" rx="8" fill="none" stroke="#2488f3" stroke-width="1.6"/><circle cx="12.5" cy="17.5" r="1.8" fill="#2488f3"/><circle cx="19.5" cy="17.5" r="1.8" fill="#2488f3"/></svg>';
+    '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 12V5" stroke="#2488f3" stroke-width="2.2" stroke-linecap="round"/><circle cx="16" cy="3.6" r="2.6" fill="#2488f3"/><rect x="4.5" y="12" width="23" height="17" rx="7" fill="#e8f1fe" stroke="#2488f3" stroke-width="1.8"/><circle cx="12.2" cy="20.5" r="2" fill="#2488f3"/><circle cx="19.8" cy="20.5" r="2" fill="#2488f3"/></svg>';
 
   function message(m) {
     if (m.role === 'user') return '<div class="msg msg--user"><div class="msg__say">"' + esc(m.text) + '"</div></div>';
@@ -66,7 +77,7 @@
         '">' +
         esc(b.label) +
         '<i class="an-more__chev" aria-hidden="true"></i></button>' +
-        (m.open ? stack(b.categories, !b.stackSeen && ((b.stackSeen = true), true), b.insight) : '') +
+        (m.open ? (b.cuts ? cutList(b.cuts) : stack(b.categories, !b.stackSeen && ((b.stackSeen = true), true), b.insight)) : '') +
         '</div>'
       );
     }
@@ -152,6 +163,7 @@
   UI.registerScreen('lumpsum', {
     title: 'AI 자산관리 상담',
     white: true,
+    morph: true,
     render() {
       const s = app().session.lumpsum;
       const st = lf().state;

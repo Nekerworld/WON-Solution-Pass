@@ -337,17 +337,28 @@
   });
 
   /* ---------- 가입 결과 (AI·직접 공용) ---------- */
-  function approvalTimeline(done) {
-    const steps = ['신청 접수', '본인/조건 재확인', '은행 심사 등록', '승인 대기'];
+  /**
+   * 접수·심사 순서. opts.wait이면 마지막 단계(은행 승인)를 대기 표시로 둔다.
+   * 해외주식 계좌 개설은 opts.steps로 승인 단계를 쓴다. 완료 화면에는 도장을 찍지 않는다.
+   */
+  function approvalTimeline(opts) {
+    const o = opts || {};
+    const steps = o.steps || ['신청 접수', '본인/조건 재확인', '은행 심사 등록', '승인 대기'];
+    const gap = o.gap || 0.55;
     return (
       '<ol class="approve-tl">' +
       steps
-        .map((label, i) => '<li class="approve-tl__item" style="animation-delay:' + i * 0.55 + 's"><span>' + esc(label) + '</span></li>')
+        .map((label, i) => {
+          const waiting = o.wait && i === steps.length - 1;
+          return '<li class="approve-tl__item' + (o.marks ? ' has-mark' : '') + (waiting ? ' is-wait' : '') + '" style="animation-delay:' + i * gap + 's"><span>' + esc(label) + (waiting ? ' 중' : '') + '</span></li>';
+        })
         .join('') +
-      '</ol>' +
-      (done ? '<div class="approve-stamp" aria-hidden="true">접수</div>' : '')
+      '</ol>'
     );
   }
+
+  /** 해외주식 계좌 개설: 신청 접수 → 은행 승인 대기(약 5초) → 개설 완료 */
+  const BROKER_STEPS = ['신청 접수', '본인/조건 재확인', '은행 심사 등록', '은행 승인'];
 
   function resultView(track) {
     const s = app().session;
@@ -365,15 +376,40 @@
     if (terms && terms.market) rows.push(['거래 시장', esc(terms.market)]);
     if (d.requestId) rows.push(['요청 번호', '<code>' + esc(d.requestId) + '</code>']);
 
+    const brokerage = p.kind === 'BROKERAGE';
+    if (brokerage && appRec && ['VERIFYING', 'D_VERIFYING', 'COMPLETED', 'D_DONE'].indexOf(st) !== -1) rows.unshift(['접수 번호', '<strong>' + esc(appRec.id) + '</strong>']);
+    if (brokerage && ['APPLYING', 'VERIFYING', 'D_VERIFYING'].indexOf(st) !== -1) {
+      const applying = st === 'APPLYING';
+      return {
+        icon: '<div class="spinner spinner--lg"></div>',
+        tone: 'neutral',
+        title: applying ? '신청을 접수하고 있어요' : '은행 승인을 기다리고 있어요',
+        desc: applying ? '잠시만 기다려 주세요.' : '신청은 접수됐어요. 은행이 계좌 개설을 승인하는 중이에요. 다시 신청하지 말고 잠시만 기다려 주세요.',
+        extra: approvalTimeline({ steps: applying ? BROKER_STEPS.slice(0, 2) : BROKER_STEPS, wait: !applying, marks: true, gap: applying ? 0.7 : 0.15 }),
+        rows: rows,
+        foot: '',
+      };
+    }
     if (['APPLYING', 'VERIFYING', 'D_VERIFYING'].indexOf(st) !== -1) {
       return {
         icon: '<div class="spinner spinner--lg"></div>',
         tone: 'neutral',
         title: '은행 심사에 등록하고 있어요',
         desc: '신청 접수부터 승인 대기까지 순서대로 확인해요. 다시 신청하지 마세요.',
-        extra: approvalTimeline(false),
+        extra: approvalTimeline(),
         rows: rows,
         foot: '',
+      };
+    }
+    if (brokerage && (st === 'COMPLETED' || st === 'D_DONE')) {
+      return {
+        icon: I.check,
+        tone: 'success',
+        title: '해외주식 계좌 개설이 완료됐어요',
+        desc: '은행 승인이 끝났어요. 홈에서 새 계좌를 확인할 수 있어요.',
+        extra: approvalTimeline({ steps: BROKER_STEPS, marks: true, gap: 0.25 }),
+        rows: rows,
+        foot: '<button class="btn btn--primary btn--block" data-action="' + newAction + '">홈으로</button>',
       };
     }
     if (st === 'COMPLETED' || st === 'D_DONE') {
@@ -383,7 +419,7 @@
         tone: 'success',
         title: p.kind === 'BROKERAGE' ? '해외주식 계좌 개설 신청이 접수됐어요' : '가입 신청이 접수됐어요',
         desc: '은행 심사에 등록되었어요.',
-        extra: approvalTimeline(true),
+        extra: approvalTimeline(),
         rows: rows,
         foot: '<button class="btn btn--primary btn--block" data-action="' + newAction + '">홈으로</button>',
       };
@@ -422,6 +458,8 @@
       foot: '<button class="btn btn--primary btn--block" data-action="' + (isJoin ? 'join-open' : 'direct-open') + '">진행 상황 보기</button>',
     };
   }
+
+  WSP.joinResult = resultView;
 
   UI.registerScreen('apply-result', {
     title: '가입 결과',

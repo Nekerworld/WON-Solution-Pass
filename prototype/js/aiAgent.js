@@ -394,6 +394,15 @@
     });
   }
 
+  /** 목돈 마련 제안 문장: 매달 얼마씩 모으면 기간 뒤 목표에 닿는지 한 줄로 말한다 */
+  function goalSavingText(basis, b) {
+    if (!basis.months) return '매달 ' + man(basis.monthly) + '씩 모으면 목표에 닿아요.';
+    const period = basis.months % 12 === 0 ? basis.months / 12 + '년' : basis.months + '개월';
+    const short = b.target.value != null && b.expectedAmount.value != null ? b.target.value - b.expectedAmount.value : 0;
+    if (short > 0) return '매달 ' + man(basis.monthly) + '씩 ' + period + ' 모아도 목표보다 ' + man(Math.round(short / 10000) * 10000) + ' 적어요.';
+    return '매달 ' + man(basis.monthly) + '씩 ' + period + ' 모으면 목표를 채울 수 있어요.';
+  }
+
   function assetPropose(basis, level, metrics) {
     return run('방향 제안 문장', { level: level, basis: { monthly: basis.monthly, months: basis.months, feasible: basis.feasible } }, {}, () => {
       const b = metrics.byKey;
@@ -409,6 +418,7 @@
         else text = '비상자금 기준은 ' + needMonths + '개월치예요. 지금은 그보다 ' + (held >= needMonths ? '많아요.' : '적어요.');
       } else if (basis.monthly == null) text = '지금 정보로는 월 적립액을 계산하기 어려워요.';
       else if (basis.purposeId === 'INVEST') text = '투자는 원금 손실이 날 수 있어요.';
+      else if (basis.purposeId === 'GOAL_SAVING') text = goalSavingText(basis, b);
       else text = '';
       return { intent: 'PROPOSE', message: text, actions: [{ type: 'PROPOSE', text: text, level: level }] };
     });

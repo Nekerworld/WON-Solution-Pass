@@ -37,6 +37,15 @@
     ESCALATED: '상담 연결이 필요해요',
   };
 
+  /** 해외주식 계좌 개설은 접수 → 은행 승인 대기 → 개설 완료로 말한다 */
+  const BROKER_RESUME = { APPLYING: '신청을 접수하고 있어요', VERIFYING: '은행 승인을 기다리고 있어요', COMPLETED: '계좌 개설이 완료됐어요' };
+
+  function joinResumeText(state, productId) {
+    const p = SC.getProduct(productId);
+    if (p && p.kind === 'BROKERAGE' && BROKER_RESUME[state]) return BROKER_RESUME[state];
+    return JOIN_RESUME[state] || state;
+  }
+
   function resumeCards() {
     const f = app().fsms;
     const s = app().session;
@@ -46,7 +55,7 @@
         action: 'join-open',
         tag: 'AI 가입 지원',
         title: SC.getProduct(s.join.productId).name,
-        desc: JOIN_RESUME[f.join.state] || f.join.state,
+        desc: joinResumeText(f.join.state, s.join.productId),
         tone: ['RESULT_UNCERTAIN', 'INVESTIGATING', 'CHECK_FAILED', 'ESCALATED', 'FAILED'].indexOf(f.join.state) !== -1 ? 'warning' : '',
       });
     }
@@ -140,7 +149,7 @@
           const t = sv.terms || {};
           accts += accountCard({
             name: p.name,
-            sub: t.monthly ? '매월 ' + man(t.monthly) + (t.months ? ' · ' + t.months + '개월' : '') : t.market ? t.market + ' 주식 거래' : '가입 완료',
+            sub: t.monthly ? '매월 ' + man(t.monthly) + (t.months ? ' · ' + t.months + '개월' : '') : t.market ? t.market + ' 주식 거래 · 개설 완료' : '가입 완료',
             tag: p.type,
             balance: balanceHtml(false, '0', p.kind === 'BROKERAGE' ? ' 원 평가금액' : ' 원'),
             transfer: false,
@@ -148,6 +157,15 @@
         });
       }
 
+      const opened = app().session.openedNotice;
+      const banner = opened
+        ? '<div class="w-done" role="status"><span class="w-done__icon">' +
+          I.check +
+          '</span><div class="w-done__txt"><strong>해외주식 계좌 개설이 완료됐어요</strong><span>은행 승인이 끝났어요. 아래에서 새 계좌를 확인해 보세요.</span></div>' +
+          '<button type="button" class="w-done__close" data-action="opened-dismiss" aria-label="닫기">' +
+          I.x +
+          '</button></div>'
+        : '';
       const cards = resumeCards();
       const resume = cards.length
         ? '<div class="w-resume"><h3>진행 중인 업무</h3>' +
@@ -200,6 +218,7 @@
         '<div class="w-strip">' +
         HOME_SCENE +
         '</div>' +
+        banner +
         accts +
         resume +
         '<h3 class="w-h3">추천서비스</h3><div class="w-hscroll">' +
@@ -510,6 +529,11 @@
   });
 
   WSP.registerActions({
+    'opened-dismiss'() {
+      app().session.openedNotice = null;
+      app().save();
+      app().refresh(['home']);
+    },
     'go-product-list'() {
       UI.navigate('product-list');
     },

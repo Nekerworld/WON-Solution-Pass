@@ -31,6 +31,8 @@
       lumpsum: null,
       /** 소비 분석에서 보여 주는 줄이기 목표 (챗봇에서 저장) */
       spendGoal: null,
+      /** 해외주식 계좌 개설이 끝났을 때 홈에서 보여 주는 완료 안내 */
+      openedNotice: null,
       /** 직전 완료 건의 지표 (시연 패널 비교용) */
       lastMetrics: { join: null, direct: null },
     };
