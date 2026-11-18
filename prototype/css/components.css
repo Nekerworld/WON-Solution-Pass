@@ -5115,3 +5115,244 @@ button.opt:hover {
   padding: 8px 14px;
   font-size: 15px;
 }
+
+.demo-panel .dp-slides {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.demo-panel .dp-slide {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 2px 8px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.demo-panel .dp-slide strong {
+  text-align: right;
+}
+
+.demo-panel .dp-slide input {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.demo-panel .dp-slide.is-off {
+  opacity: 0.45;
+}
+
+.demo-panel .dp-spare,
+.demo-panel .dp-hint,
+.demo-panel .dp-spoken,
+.demo-panel .dp-snap,
+.demo-panel .dp-acct {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.demo-panel .dp-spoken {
+  color: var(--won-blue-deep);
+  font-weight: 700;
+}
+
+.demo-panel .dp-presets,
+.demo-panel .dp-scenes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.demo-panel .dp-presets button,
+.demo-panel .dp-scenes button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.chat-input.is-hot .chat-input__send {
+  background: var(--won-blue);
+  color: #fff;
+}
+
+.chat-input.is-typing .type-caret,
+.stream-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 1px;
+  background: var(--won-blue);
+  vertical-align: text-bottom;
+  animation: blink 1s steps(1) infinite;
+}
+
+.chat-input__send.is-stop {
+  background: var(--text);
+}
+
+.stop-sq {
+  display: block;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border-radius: 2px;
+}
+
+.an-steps {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+
+.an-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  animation: an-in 0.4s ease both;
+}
+
+.an-step__mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--won-blue);
+  position: relative;
+}
+
+.an-step__mark::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 4px;
+  height: 7px;
+  border-right: 2px solid var(--won-blue);
+  border-bottom: 2px solid var(--won-blue);
+  transform: rotate(40deg);
+}
+
+.spend-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.spend-bar {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.spend-bar__track {
+  display: block;
+  height: 8px;
+  background: #e8eef6;
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.spend-bar__track i {
+  display: block;
+  height: 100%;
+  background: var(--won-blue);
+  width: 0;
+  animation: bar-in 0.6s ease forwards;
+}
+
+.decision-line {
+  margin: 8px 0 0;
+  font-weight: 700;
+}
+
+.thought-label {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.msg-tools {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.msg-tools button {
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.msg-tools__like.is-on {
+  color: var(--won-blue);
+}
+
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.thinking__dots i {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 3px;
+  border-radius: 50%;
+  background: var(--won-blue);
+  animation: blink 1s infinite;
+}
+
+.approve-tl {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+}
+
+.approve-tl__item {
+  margin: 6px 0;
+  opacity: 0;
+  animation: an-in 0.45s ease forwards;
+}
+
+.approve-stamp {
+  width: 72px;
+  height: 72px;
+  margin: 12px auto 0;
+  border: 3px solid #d23b3b;
+  color: #d23b3b;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  transform: rotate(-12deg);
+  animation: pop 0.45s ease both;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+@keyframes an-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes bar-in {
+  from { width: 0; }
+}

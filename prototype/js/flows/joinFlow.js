@@ -745,6 +745,8 @@
 
   async function stepVerify(ep) {
     const j = S();
+    await WSP.utils.sleep(2800 * bank.getLatencyScale());
+    if (stale(ep)) return;
     const r = await bank.getApplicationResult(j.appId);
     if (stale(ep)) return;
     if (r.ok) j.application = r.data.application;

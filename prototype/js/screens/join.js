@@ -337,6 +337,18 @@
   });
 
   /* ---------- 가입 결과 (AI·직접 공용) ---------- */
+  function approvalTimeline(done) {
+    const steps = ['신청 접수', '본인/조건 재확인', '은행 심사 등록', '승인 대기'];
+    return (
+      '<ol class="approve-tl">' +
+      steps
+        .map((label, i) => '<li class="approve-tl__item" style="animation-delay:' + i * 0.55 + 's"><span>' + esc(label) + '</span></li>')
+        .join('') +
+      '</ol>' +
+      (done ? '<div class="approve-stamp" aria-hidden="true">접수</div>' : '')
+    );
+  }
+
   function resultView(track) {
     const s = app().session;
     const isJoin = track !== 'direct';
@@ -357,19 +369,21 @@
       return {
         icon: '<div class="spinner spinner--lg"></div>',
         tone: 'neutral',
-        title: '가입 결과를 확인하고 있어요',
-        desc: '은행 처리 결과가 확인될 때까지 다시 신청하지 마세요.',
+        title: '은행 심사에 등록하고 있어요',
+        desc: '신청 접수부터 승인 대기까지 순서대로 확인해요. 다시 신청하지 마세요.',
+        extra: approvalTimeline(false),
         rows: rows,
         foot: '',
       };
     }
     if (st === 'COMPLETED' || st === 'D_DONE') {
-      rows.unshift(['가입 번호', '<strong>' + esc(appRec.id) + '</strong>']);
+      rows.unshift(['접수 번호', '<strong>' + esc(appRec.id) + '</strong>']);
       return {
         icon: I.check,
         tone: 'success',
-        title: p.kind === 'BROKERAGE' ? '해외주식 계좌 개설이 확인됐어요' : '가입이 완료됐어요',
-        desc: '',
+        title: p.kind === 'BROKERAGE' ? '해외주식 계좌 개설 신청이 접수됐어요' : '가입 신청이 접수됐어요',
+        desc: '은행 심사에 등록되었어요.',
+        extra: approvalTimeline(true),
         rows: rows,
         foot: '<button class="btn btn--primary btn--block" data-action="' + newAction + '">홈으로</button>',
       };
@@ -425,6 +439,7 @@
         esc(v.title) +
         '</h2>' +
         (v.desc ? '<p class="result__desc">' + esc(v.desc) + '</p>' : '') +
+        (v.extra || '') +
         '</div>' +
         (v.rows.length ? '<div class="card">' + UI.kvRows(v.rows) + '</div>' : '') +
         '</div>' +

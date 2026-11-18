@@ -259,38 +259,132 @@
     assert(jf().state === 'COMPLETED', '결과 ' + jf().state);
   });
 
-  t('통합 시나리오 상담: 해외주식 투자 상담 → 투자 방향 제안 → 해외주식 계좌로 연결', async () => {
+  function setMoney(income, expense, debt) {
+    const pay = WSP.lumpsumAdvisor.debtPayment(debt || 0);
+    store.update((d) => {
+      d.finance.items.monthlyIncome.value = income;
+      d.finance.items.monthlyExpense.value = expense;
+      d.finance.items.debt.value = debt || 0;
+      d.finance.items.debtPayment.value = pay;
+    }, '[자가 테스트] 목돈 프로필');
+  }
+
+  async function lumpUntilGoal(goalId) {
+    const L = WSP.lumpsumFlow;
+    const goal = WSP.lumpsumAdvisor.GOALS[goalId || 'goal-100'];
+    assert(L.startNew(), '목돈 상담 시작 ' + WSP.app.fsms.lumpsum.state);
+    await L.accept(WSP.lumpsumScript.OPENING);
+    await L.accept(goal.text, goalId || 'goal-100');
+    return WSP.app.session.lumpsum;
+  }
+
+  function assertClean(text) {
+    assert(!WSP.lumpsumScript.BANNED.test(text), '금지어: ' + text);
+    WSP.aiSchema.FORBIDDEN_PHRASES.forEach((re) => assert(!re.test(text), '완료 단정: ' + text));
+  }
+
+  t('통합 시나리오 상담: 목돈 불리기 7턴 → 해외주식 개설 신청', async () => {
     fresh();
-    const F = WSP.assetFlow;
-    F.start();
-    F.agree();
-    await F.setGoal('해외주식 투자를 처음 시작해 보고 싶어요');
-    const a = WSP.app.session.asset;
-    assert(a.purpose === 'INVEST', '목적 ' + a.purpose);
-    const asked = [];
-    let n = 0;
-    while (af().state === 'ASKING' && n < 4) {
-      asked.push(a.pendingQuestion);
-      const q = AA.QUESTIONS[a.pendingQuestion];
-      await F.answerChip(String(q.options[0][1]), q.options[0][0]);
-      n += 1;
-    }
-    assert(asked.indexOf('monthlyIncome') === -1 && asked.indexOf('monthlyExpense') === -1, '월급·지출을 다시 물음 ' + asked.join(','));
-    assert(af().state === 'REVIEW' && a.proposal.level === 'FULL', '상태 ' + af().state + ' / ' + (a.proposal && a.proposal.level));
-    assert(asked[0] === 'investPace', '첫 질문 ' + asked.join(','));
-    assert(a.proposal.basis.monthly === 420000, '월 투자 금액 ' + a.proposal.basis.monthly);
-    const prop = a.chat.filter((m) => m.kind === 'proposal').pop();
-    assert(prop && /원금 손실/.test(prop.text), '투자 위험 안내 없음');
-    await F.accept();
-    const shared = WSP.app.session.customerContext;
-    assert(shared && shared.goal === '해외주식 투자를 처음 시작해 보고 싶어요', '목표 전달 ' + (shared && shared.goal));
-    assert(shared.financialSummary && shared.financialSummary.monthly === 420000, '참고 금액 ' + (shared.financialSummary && shared.financialSummary.monthly));
-    F.nextAction('explore');
-    assert(af().state === 'EXPLORE', '상태 ' + af().state);
-    const ids = SC.PRODUCTS.map((p) => p.id);
-    assert(ids[0] === SC.DEMO.productId && ids.length >= 4, '상품 목록 ' + ids.join(','));
-    assert(a.chat.filter((m) => m.kind === 'interpret').length === 1, '숫자 설명이 한 번이 아님');
-    assert(!a.chat.some((m) => /기준으로 계산/.test(m.text)), '목표를 되풀이하는 문장이 남음');
+    setMoney(3500000, 2100000, 0);
+    const s = await lumpUntilGoal('goal-100');
+    assert(s.advice.decisionId === 'MIX', '판단 ' + s.advice.decisionId);
+    assert(s.advice.surplus === 1400000, '월 여유 ' + s.advice.surplus);
+    assert(WSP.app.fsms.lumpsum.state === 'DEBT_CHECK', '상태 ' + WSP.app.fsms.lumpsum.state);
+    const card = s.chat.filter((m) => m.decisionLine).pop();
+    assert(card && card.figures.map((f) => f.value).join('|') === s.advice.figures.decision.map((f) => f.value).join('|'), '판단 카드 숫자');
+    assert(s.prompt.choices.length > 0, '추천 질문이 없음');
+    const L = WSP.lumpsumFlow;
+    const LA = WSP.lumpsumAdvisor;
+    await L.accept(WSP.lumpsumScript.situationText(0));
+    await L.accept(LA.EXPERIENCE['exp-1'].text, 'exp-1');
+    await L.accept(LA.LOSS['loss-1'].text, 'loss-1');
+    assert(s.advice.profile.id === 'NEUTRAL' && !s.advice.leverage, '성향 ' + s.advice.profile.id + ' / 레버리지 ' + s.advice.leverage);
+    assert(!s.prompt.choices.some((c) => c.id === 'prod-lev'), '기본 경로에 레버리지');
+    const reco = s.chat.filter((m) => m.figures && /성향은/.test(m.text)).pop();
+    assert(reco && reco.figures.map((f) => f.value).join('|') === s.advice.figures.recommend.map((f) => f.value).join('|'), '추천 카드 숫자');
+    await L.accept('해외주식', 'prod-os');
+    await L.accept('응, 개설해 주세요', 'open-yes');
+    assert(WSP.app.fsms.lumpsum.state === 'TO_JOIN', '상태 ' + WSP.app.fsms.lumpsum.state);
+    assert(WSP.app.fsms.join.state === 'CONSENT', '가입 ' + WSP.app.fsms.join.state);
+    const ctx = WSP.app.session.customerContext;
+    assert(ctx.decisionId === 'MIX', '판단 전달 ' + ctx.decisionId);
+    assert(ctx.financialSummary.monthly === s.advice.monthlyInvest, '월 투자금 ' + ctx.financialSummary.monthly);
+    assert(ctx.goal === LA.GOALS['goal-100'].text, '목표 전달');
+    s.chat.forEach((m) => assertClean(m.text || ''));
+  });
+
+  t('목돈 판단 분기, 성향, 스냅샷, 금지 문구', async () => {
+    const LA = WSP.lumpsumAdvisor;
+    const LS = WSP.lumpsumScript;
+    assert(LA.inferRiskProfile(LA.EXPERIENCE['exp-0'].text, LA.LOSS['loss-0'].text).id === 'STABLE', '안정');
+    assert(LA.inferRiskProfile(LA.EXPERIENCE['exp-1'].text, LA.LOSS['loss-1'].text).id === 'NEUTRAL', '중립');
+    assert(LA.inferRiskProfile(LA.EXPERIENCE['exp-2'].text, LA.LOSS['loss-2'].text).id === 'ACTIVE', '적극');
+    LS.allFixedLines().forEach(assertClean);
+
+    fresh();
+    setMoney(3500000, 3600000, 0);
+    let s = await lumpUntilGoal('goal-100');
+    assert(s.advice.decisionId === 'SPEND_CHECK', '여유 없음 ' + s.advice.decisionId);
+    assert(WSP.app.fsms.lumpsum.state === 'CLOSED', '종료 ' + WSP.app.fsms.lumpsum.state);
+    assert(!s.prompt.choices.length, '여유 없음인데 추천 질문');
+    assertClean(s.chat.map((m) => m.text).join('\n'));
+
+    fresh();
+    setMoney(3500000, 2100000, 30000000);
+    s = await lumpUntilGoal('goal-100');
+    assert(s.advice.decisionId === 'DEBT_FIRST', '부채 ' + s.advice.decisionId);
+    assert(s.advice.debtPayment === LA.debtPayment(30000000), '상환액');
+    assertClean(s.chat.map((m) => m.text + (m.decisionLine || '')).join('\n'));
+
+    fresh();
+    setMoney(3500000, 3000000, 0);
+    s = await lumpUntilGoal('goal-100');
+    assert(s.advice.decisionId === 'EMERGENCY_FIRST', '비상자금 ' + s.advice.decisionId + ' ' + s.advice.emergencyMonths);
+
+    fresh();
+    setMoney(3500000, 2100000, 0);
+    s = await lumpUntilGoal('goal-20');
+    assert(s.advice.decisionId === 'SAVINGS_ENOUGH' && s.advice.goalAmount === 20000000, '적금 달성 ' + s.advice.decisionId);
+    s = await (async () => {
+      WSP.app.fsms.lumpsum.transition('EXIT');
+      WSP.app.fsms.lumpsum.transition('NEW_CASE');
+      return lumpUntilGoal('goal-50');
+    })();
+    assert(s.advice.goalAmount === 50000000 && s.advice.goalMonths === 60, '5천만 목표');
+
+    fresh();
+    setMoney(3500000, 2100000, 0);
+    s = await lumpUntilGoal('goal-100');
+    const frozen = s.snap.expense;
+    const frozenId = s.advice.decisionId;
+    setMoney(3500000, 3600000, 0);
+    assert(s.snap.expense === frozen && s.advice.decisionId === frozenId, '진행 중 스냅샷이 바뀜');
+    const L = WSP.lumpsumFlow;
+    await L.accept(LS.MISMATCH[0].text, LS.MISMATCH[0].id);
+    assert(s.advice.decisionId === 'MIX', '추천 질문이 판단을 바꿈');
+    WSP.app.fsms.lumpsum.transition('EXIT');
+    WSP.app.fsms.lumpsum.transition('NEW_CASE');
+    s = await lumpUntilGoal('goal-100');
+    assert(s.advice.decisionId === 'SPEND_CHECK', '새 채팅 반영 ' + s.advice.decisionId);
+
+    fresh();
+    setMoney(3500000, 2600000, 0);
+    assert(WSP.lumpsumFlow.startNew(), '레버리지 상담');
+    await L.accept(LS.OPENING);
+    await L.accept(LA.GOALS['goal-100'].text, 'goal-100');
+    await L.accept(LS.situationText(0));
+    await L.accept(LA.EXPERIENCE['exp-2'].text, 'exp-2');
+    await L.accept(LA.LOSS['loss-2'].text, 'loss-2');
+    s = WSP.app.session.lumpsum;
+    assert(s.advice.decisionId === 'MIX' && s.advice.profile.id === 'ACTIVE' && s.advice.leverage, '레버리지 조건 ' + s.advice.decisionId + ' ' + s.advice.yieldRate);
+    assert(s.prompt.choices.some((c) => c.id === 'prod-lev'), '레버리지 선택지');
+    assert(/넣은 돈보다 더 잃을 수 있어요/.test(s.chat.map((m) => m.text).join('\n')), '손실 경고');
+    await L.accept('국내주식', 'prod-dom');
+    assert(WSP.app.fsms.lumpsum.state === 'CLOSED' && WSP.app.fsms.join.state === 'IDLE', '국내주식은 가입으로 가지 않음');
+
+    const cats = LA.advise({ income: 3500000, expense: 2100000, debt: 0, deposit: LA.DEPOSIT_DEFAULT, goalAmount: 100000000, goalMonths: 36 }).categories;
+    const sum = cats.reduce((n, c) => n + c.amount, 0);
+    assert(sum === 2100000, '막대 합 ' + sum);
   });
 
   t('통합 시나리오 가입: 이미 있는 계좌 → 외환·외화계좌·투자성향 → 승인 → 개설', async () => {

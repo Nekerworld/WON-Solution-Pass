@@ -267,6 +267,26 @@
         ['TO_JOIN', 'NEW_CASE', 'IDLE', 'S'],
       ].concat(EXIT_P8(['CONSENT', 'GOAL', 'ASKING', 'GAP_CHECK', 'REVIEW', 'NEXT_ACTION', 'EXPLORE', 'HOLD'], 'CLOSED')),
     },
+    lumpsum: {
+      name: '목돈 불리기',
+      initial: 'IDLE',
+      edges: [
+        ['IDLE', 'START', 'INTRO', 'D'],
+        ['INTRO', 'SENT', 'ANALYZING', 'D'],
+        ['ANALYZING', 'SHOWN', 'GOAL', 'D'],
+        ['GOAL', 'SENT', 'DEBT_CHECK', 'D'],
+        ['DEBT_CHECK', 'STOP', 'CLOSED', 'D'],
+        ['DEBT_CHECK', 'SENT', 'PROFILING', 'D'],
+        ['PROFILING', 'SENT', 'LOSS', 'D'],
+        ['LOSS', 'SENT', 'RECOMMEND', 'D'],
+        ['RECOMMEND', 'OVERSEAS', 'NO_ACCOUNT', 'D'],
+        ['RECOMMEND', 'OTHER', 'CLOSED', 'D'],
+        ['NO_ACCOUNT', 'OPEN', 'TO_JOIN', 'D'],
+        ['NO_ACCOUNT', 'LATER', 'CLOSED', 'D'],
+        ['TO_JOIN', 'NEW_CASE', 'IDLE', 'S'],
+        ['CLOSED', 'NEW_CASE', 'IDLE', 'S'],
+      ].concat(EXIT_P8(['INTRO', 'ANALYZING', 'GOAL', 'DEBT_CHECK', 'PROFILING', 'LOSS', 'RECOMMEND', 'NO_ACCOUNT'], 'CLOSED')),
+    },
   });
 
   function buildTable(def) {

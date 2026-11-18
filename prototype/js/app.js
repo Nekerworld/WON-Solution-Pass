@@ -17,6 +17,7 @@
     join: WSP.createFSM('join'),
     direct: WSP.createFSM('direct'),
     asset: WSP.createFSM('asset'),
+    lumpsum: WSP.createFSM('lumpsum'),
   };
 
   function freshSession() {
@@ -27,6 +28,7 @@
       join: null,
       direct: null,
       asset: null,
+      lumpsum: null,
       /** 직전 완료 건의 지표 (시연 패널 비교용) */
       lastMetrics: { join: null, direct: null },
     };
@@ -144,6 +146,7 @@
     session.lastMetrics = lastMetrics;
     if (WSP.aiAgent) WSP.aiAgent.clearTrace();
     WSP.events.clear();
+    if (WSP.demoProfile) WSP.demoProfile.reapply();
     WSP.events.add('APP', '데모 초기화');
     emitChange();
     WSP.ui.navigate('home', {}, { resetHistory: true, animate: false });

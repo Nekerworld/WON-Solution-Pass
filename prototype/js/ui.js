@@ -347,7 +347,7 @@
   /* ==================================================================
    * 화면 등록 / 라우터
    * ================================================================== */
-  const SCREEN_IDS = Object.freeze(['home', 'products', 'product-list', 'product', 'menu', 'join-consent', 'join', 'apply', 'apply-result', 'support', 'direct', 'asset-consent', 'asset', 'explore']);
+  const SCREEN_IDS = Object.freeze(['home', 'products', 'product-list', 'product', 'menu', 'join-consent', 'join', 'apply', 'apply-result', 'support', 'direct', 'asset-consent', 'asset', 'explore', 'lumpsum']);
   const SCREENS = {};
 
   function registerScreen(id, def) {
@@ -821,6 +821,7 @@
     kvRows: kvRows,
     condBadge: condBadge,
     queryErrorCard: queryErrorCard,
+    figures: figures,
     chatLog: chatLog,
     chatHeader: chatHeader,
     chatIntro: chatIntro,

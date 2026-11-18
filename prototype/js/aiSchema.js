@@ -78,5 +78,5 @@
     return { valid: errors.length === 0, errors: errors };
   }
 
-  WSP.aiSchema = { TYPES: TYPES, TOOLS: TOOLS, FORBIDDEN_TOOLS: FORBIDDEN_TOOLS, validate: validate };
+  WSP.aiSchema = { TYPES: TYPES, TOOLS: TOOLS, FORBIDDEN_TOOLS: FORBIDDEN_TOOLS, FORBIDDEN_PHRASES: FORBIDDEN_PHRASES, validate: validate };
 })();

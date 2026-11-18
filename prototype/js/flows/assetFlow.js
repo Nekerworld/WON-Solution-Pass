@@ -676,6 +676,7 @@
 
   WSP.registerActions({
     'asset-start'() {
+      if (!/[?&]legacy=1(?:&|$)/.test(location.search) && WSP.lumpsumFlow) return WSP.lumpsumFlow.open();
       if (freshConsult()) {
         if (start()) UI().navigate('asset-consent');
         return;
@@ -715,6 +716,7 @@
       if (!root || !root.classList.contains('is-ready')) return;
       const text = root.querySelector('.fortune__text');
       const line = text ? text.textContent.trim() : '';
+      if (!/[?&]legacy=1(?:&|$)/.test(location.search) && WSP.lumpsumFlow) return WSP.lumpsumFlow.open();
       if (!freshConsult()) return openConsult();
       return sendCookie(line);
     },
