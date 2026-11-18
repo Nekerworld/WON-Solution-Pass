@@ -1527,6 +1527,17 @@
   border-left: 1px solid #eef0f3;
 }
 
+/* 버튼이 하나뿐인 도구줄은 오른쪽에 붙인다 */
+.chat-tools:has(> button:only-child) {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 12px;
+}
+
+.chat-tools:has(> button:only-child) button {
+  padding: 8px 6px 10px;
+}
+
 .chat-tools svg {
   width: 15px;
   height: 15px;

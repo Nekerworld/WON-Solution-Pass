@@ -232,7 +232,7 @@
   /** 우리WON뱅킹 하단 탭. 해결패스 기능이 없는 탭은 눌러도 아무 일이 없다. */
   const NAV = [
     ['products', 'go-products', I.product, '상품'],
-    ['asset', 'asset-start', I.pie, '자산·소비'],
+    ['asset', 'spend-open', I.pie, '자산·소비'],
     ['home', 'go-home', I.homeFill, '홈'],
     ['stock', 'noop', I.stock, '주식'],
     ['benefit', 'noop', I.gift, '혜택'],
@@ -257,45 +257,84 @@
     );
   }
 
-  /** 새 메시지의 첫 줄만 대화 영역 위에 맞춘다. 바닥으로 내리지 않고, 이전 말을 읽는 중이면 그대로 둔다. */
+  /* 사용자가 위로 올려 읽는 중인 대화 영역. 화면이 다시 그려져도 유지한다. */
+  const scrollHold = {};
+
+  function chatNodes(body) {
+    return body.querySelectorAll('.chat-log > .msg, .chat-log > .msg-sys');
+  }
+
+  /**
+   * 카메라가 있어야 할 위치.
+   * 짧은 메시지는 첫 줄을 위에 맞추고, 화면보다 길어지면 지금 생성되는 끝 줄을 따라간다.
+   */
+  function followTarget(body) {
+    const nodes = chatNodes(body);
+    const last = nodes[nodes.length - 1];
+    if (!last) return null;
+    const rb = body.getBoundingClientRect();
+    const rl = last.getBoundingClientRect();
+    const k = rb.height && body.clientHeight ? rb.height / body.clientHeight : 1; // CSS zoom 보정
+    const top = (rl.top - rb.top) / k + body.scrollTop - 12;
+    const bottom = (rl.bottom - rb.top) / k + body.scrollTop - body.clientHeight + 28;
+    return Math.max(0, top, bottom);
+  }
+
+  /** 목표 위치로 부드럽게 따라간다. 이동 중에는 스크롤 이벤트를 사용자 조작으로 보지 않는다. */
+  function glide(body, to) {
+    body._glideTo = to;
+    if (body._gliding) return;
+    body._gliding = true;
+    body.dataset.locking = '1';
+    const step = () => {
+      if (!body.isConnected) return;
+      const d = body._glideTo - body.scrollTop;
+      if (Math.abs(d) < 1) {
+        body.scrollTop = body._glideTo;
+        body._gliding = false;
+        requestAnimationFrame(() => {
+          body.dataset.locking = '';
+        });
+        return;
+      }
+      body.scrollTop += Math.sign(d) * Math.max(1.5, Math.abs(d) * 0.2);
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  /** 새 문장이 생길 때마다 호출한다. 이전 말을 읽는 중이면 그대로 둔다. */
   function scrollToLatest(body) {
     if (!body) return;
+    const key = body.id || 'chat';
     if (!body.dataset.scrollBound) {
       body.dataset.scrollBound = '1';
+      const stop = () => {
+        if (body._gliding) body._glideTo = body.scrollTop;
+      };
+      body.addEventListener('wheel', stop, { passive: true });
+      body.addEventListener('touchstart', stop, { passive: true });
       body.addEventListener(
         'scroll',
         () => {
           if (body.dataset.locking === '1') return;
-          const msgs = body.querySelectorAll('.chat-log > .msg, .chat-log > .msg-sys');
-          const last = msgs[msgs.length - 1];
-          if (!last) return;
-          const lastTop = last.getBoundingClientRect().top - body.getBoundingClientRect().top;
-          if (lastTop > 48) body.dataset.userScrolled = '1';
-          else body.dataset.userScrolled = '';
+          const t = followTarget(body);
+          if (t == null) return;
+          scrollHold[key] = body.scrollTop < t - 60 ? chatNodes(body).length : 0;
         },
         { passive: true }
       );
     }
-    if (body.dataset.userScrolled === '1') return;
-    const pin = () => {
-      const nodes = body.querySelectorAll('.chat-log > .msg, .chat-log > .msg-sys');
-      const lastMsg = nodes[nodes.length - 1];
-      if (!lastMsg) return;
-      const top = lastMsg.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 12;
+    if (scrollHold[key] && scrollHold[key] === chatNodes(body).length) return;
+    const to = followTarget(body);
+    if (to == null) return;
+    if (Math.abs(to - body.scrollTop) > body.clientHeight * 1.2) {
       body.dataset.locking = '1';
-      body.scrollTop = Math.max(0, top);
-    };
-    pin();
-    requestAnimationFrame(() => {
-      if (body.dataset.userScrolled === '1') {
-        body.dataset.locking = '';
-        return;
-      }
-      pin();
+      body.scrollTop = to;
       requestAnimationFrame(() => {
         body.dataset.locking = '';
       });
-    });
+    } else glide(body, to);
   }
 
   /** 상담·가입이 공유하는 상황 카드. 확인된 항목만 보여 준다. */
@@ -346,7 +385,7 @@
   /* ==================================================================
    * 화면 등록 / 라우터
    * ================================================================== */
-  const SCREEN_IDS = Object.freeze(['home', 'products', 'product-list', 'product', 'menu', 'join-consent', 'join', 'apply', 'apply-result', 'support', 'direct', 'asset-consent', 'asset', 'explore', 'lumpsum']);
+  const SCREEN_IDS = Object.freeze(['home', 'products', 'product-list', 'product', 'menu', 'join-consent', 'join', 'apply', 'apply-result', 'support', 'direct', 'asset-consent', 'asset', 'explore', 'lumpsum', 'spend']);
   const SCREENS = {};
 
   function registerScreen(id, def) {

@@ -276,6 +276,8 @@
         ['ANALYZING', 'SHOWN', 'GOAL', 'D'],
         ['GOAL', 'SENT', 'DEBT_CHECK', 'D'],
         ['DEBT_CHECK', 'STOP', 'CLOSED', 'D'],
+        ['DEBT_CHECK', 'PLAN', 'SPEND_PLAN', 'D'],
+        ['SPEND_PLAN', 'DONE', 'CLOSED', 'D'],
         ['DEBT_CHECK', 'SENT', 'PROFILING', 'D'],
         ['PROFILING', 'SENT', 'LOSS', 'D'],
         ['LOSS', 'SENT', 'RECOMMEND', 'D'],
@@ -285,7 +287,7 @@
         ['NO_ACCOUNT', 'LATER', 'CLOSED', 'D'],
         ['TO_JOIN', 'NEW_CASE', 'IDLE', 'S'],
         ['CLOSED', 'NEW_CASE', 'IDLE', 'S'],
-      ].concat(EXIT_P8(['INTRO', 'ANALYZING', 'GOAL', 'DEBT_CHECK', 'PROFILING', 'LOSS', 'RECOMMEND', 'NO_ACCOUNT'], 'CLOSED')),
+      ].concat(EXIT_P8(['INTRO', 'ANALYZING', 'GOAL', 'DEBT_CHECK', 'SPEND_PLAN', 'PROFILING', 'LOSS', 'RECOMMEND', 'NO_ACCOUNT'], 'CLOSED')),
     },
   });
 

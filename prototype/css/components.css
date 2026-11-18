@@ -5145,6 +5145,18 @@ button.opt:hover {
   opacity: 0.45;
 }
 
+/* 왼쪽 열: 수입, 지출 / 오른쪽 열: 부채 토글, 부채 잔액 */
+.demo-panel .dp-persona-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 20px;
+  align-items: center;
+}
+
+.demo-panel .dp-persona-grid > .dp-btn {
+  width: 100%;
+}
+
 .demo-panel .dp-spare,
 .demo-panel .dp-hint,
 .demo-panel .dp-spoken,
@@ -5217,7 +5229,8 @@ button.opt:hover {
   align-items: center;
   gap: 8px;
   margin: 4px 0;
-  animation: an-in 0.4s ease both;
+  font-size: 13.5px;
+  color: var(--text-2);
 }
 
 .an-step__mark {
@@ -5226,6 +5239,7 @@ button.opt:hover {
   border-radius: 50%;
   border: 2px solid var(--won-blue);
   position: relative;
+  flex: none;
 }
 
 .an-step__mark::after {
@@ -5240,38 +5254,100 @@ button.opt:hover {
   transform: rotate(40deg);
 }
 
-.spend-bars {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 8px 0;
+/* 처음 나올 때만: 돌다가 하나씩 체크로 바뀐다 */
+.an-steps.is-new .an-step {
+  opacity: 0;
+  animation: an-in 0.3s ease forwards;
+  animation-delay: calc(var(--i) * 0.7s);
 }
 
-.spend-bar {
+.an-steps.is-new .an-step__mark {
+  border-color: #cfe0f7;
+  border-top-color: var(--won-blue);
+  animation: an-spin 0.7s linear calc(var(--i) * 0.7s) 1 both, an-ring 0.01s linear calc(var(--i) * 0.7s + 0.6s) forwards;
+}
+
+.an-steps.is-new .an-step__mark::after {
+  opacity: 0;
+  animation: an-fade 0.2s ease calc(var(--i) * 0.7s + 0.6s) forwards;
+}
+
+@keyframes an-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes an-ring {
+  to {
+    border-color: var(--won-blue);
+  }
+}
+
+@keyframes an-fade {
+  to {
+    opacity: 1;
+  }
+}
+
+.blk.is-new:not(.msg__text) {
+  animation: blk-in 0.45s ease both;
+}
+
+@keyframes blk-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.blk + .blk {
+  margin-top: 10px;
+}
+
+.blk--cols .figs {
   display: grid;
-  grid-template-columns: 72px 1fr auto;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.blk--cols .fig__value {
+  font-size: 20px;
+}
+
+.an-more__head {
+  display: flex;
+  width: 100%;
   align-items: center;
-  font-size: 13px;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid #e3e9f1;
+  border-radius: 12px;
+  background: #f6f9fd;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 700;
+  text-align: left;
 }
 
-.spend-bar__track {
-  display: block;
+.an-more__chev {
+  width: 8px;
   height: 8px;
-  background: #e8eef6;
-  border-radius: 99px;
-  overflow: hidden;
+  border-right: 2px solid var(--text-3);
+  border-bottom: 2px solid var(--text-3);
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
 }
 
-.spend-bar__track i {
-  display: block;
-  height: 100%;
-  background: var(--won-blue);
-  width: 0;
-  animation: bar-in 0.6s ease forwards;
+.an-more.is-open .an-more__chev {
+  transform: rotate(-135deg);
 }
 
-.decision-line {
+.an-more .decision-line {
   margin: 8px 0 0;
   font-weight: 700;
 }
@@ -5280,23 +5356,6 @@ button.opt:hover {
   margin: 8px 0 0;
   font-size: 12px;
   color: var(--text-3);
-}
-
-.msg-tools {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.msg-tools button {
-  border: 0;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 12px;
-}
-
-.msg-tools__like.is-on {
-  color: var(--won-blue);
 }
 
 .thinking {
@@ -5356,4 +5415,319 @@ button.opt:hover {
 
 @keyframes bar-in {
   from { width: 0; }
+}
+
+/* 시연 패널: 페르소나 요약과 목표별 정보 */
+.demo-panel .dp-confirm {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.demo-panel .dp-sum {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.demo-panel .dp-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--won-blue);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.demo-panel .dp-edit__chev {
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.demo-panel .dp-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 99px;
+  background: #e8f1fe;
+  color: var(--won-blue);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.demo-panel .dp-note {
+  margin: -2px 0 6px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.chat-body .chat-suggest {
+  margin-top: 10px;
+}
+
+/* 소비 막대: 하나의 가로 막대에 색으로 나누고 범례로 금액·비율을 읽어 준다 */
+.an-more .spend-stack {
+  margin: 12px 2px 2px;
+}
+
+.spend-stack__bar {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.spend-stack__bar i {
+  display: block;
+  min-width: 4px;
+}
+
+.spend-stack.is-new .spend-stack__bar {
+  animation: stack-in 0.7s ease both;
+}
+
+@keyframes stack-in {
+  from {
+    clip-path: inset(0 100% 0 0 round 7px);
+  }
+  to {
+    clip-path: inset(0 0 0 0 round 7px);
+  }
+}
+
+.spend-legend {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.spend-legend li {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.spend-legend .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.spend-legend strong {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 소비 분석: 출처 라벨, 지난달 대비, 패턴 태그, 줄이기 목표 */
+.spend-source {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted, #7b8794);
+}
+
+.spend-stack.has-chg .spend-legend li {
+  grid-template-columns: 12px 1fr auto 44px;
+}
+
+.spend-chg {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #8a94a3;
+}
+
+.spend-chg.is-up {
+  color: #e5484d;
+}
+
+.spend-chg.is-down {
+  color: #2488f3;
+}
+
+.pat-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pat-tag {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #eef4fd;
+  color: #1c5fb8;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.blk--tags {
+  margin-top: 4px;
+}
+
+.spend-body .card {
+  margin-top: 12px;
+}
+
+.spend-head {
+  display: grid;
+  gap: 4px;
+  padding: 4px 2px 8px;
+}
+
+.spend-head span {
+  font-size: 13px;
+  color: var(--muted, #7b8794);
+}
+
+.spend-head strong {
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.cmp {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.cmp li {
+  display: grid;
+  grid-template-columns: 1fr auto 14px auto 44px;
+  gap: 6px;
+  align-items: center;
+  font-size: 13.5px;
+}
+
+.cmp__prev {
+  color: #8a94a3;
+}
+
+.cmp__arrow {
+  font-style: normal;
+  color: #b4bcc8;
+}
+
+.spend-goal__empty {
+  margin: 8px 0 2px;
+  font-weight: 700;
+}
+
+.spend-goal__hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted, #7b8794);
+}
+
+.spend-goal__big {
+  margin: 8px 0 10px;
+  font-size: 18px;
+}
+
+.spend-goal__big strong {
+  color: #2488f3;
+}
+
+.spend-goal__list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  font-size: 13.5px;
+}
+
+.spend-goal__list li {
+  display: flex;
+  justify-content: space-between;
+}
+
+.spend-goal__prog {
+  display: grid;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted, #7b8794);
+}
+
+.spend-goal__track {
+  height: 8px;
+  border-radius: 4px;
+  background: #e8edf3;
+  overflow: hidden;
+}
+
+.spend-goal__track i {
+  display: block;
+  height: 100%;
+  background: #2488f3;
+}
+
+.spend-goal__after {
+  margin: 12px 0 0;
+  font-size: 13.5px;
+}
+
+/* 상담 선택지: 칩 사이에 위아래 2px, 좌우 4px */
+.chat-body .chat-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+}
+
+.chat-body .chat-suggest .chip {
+  max-width: 100%;
+}
+
+/* 상담 입력창: 긴 문장은 세로로 늘어난다 (높이는 JS가 글자 수에 맞춘다) */
+.chat-input__field:has(textarea) {
+  height: auto;
+  min-height: 46px;
+  align-items: flex-end;
+}
+
+.chat-input textarea {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  padding: 11px 0;
+  font: inherit;
+  font-size: 14.5px;
+  line-height: 22px;
+  height: 44px;
+  caret-color: var(--won-blue);
+}
+
+.chat-input__field:has(textarea) .chat-input__send {
+  align-self: flex-end;
+  margin-bottom: 3px;
+}
+
+.chat-input__field:has(textarea) .type-caret {
+  align-self: flex-end;
+  margin-bottom: 15px;
 }

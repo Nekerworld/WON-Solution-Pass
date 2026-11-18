@@ -16,16 +16,6 @@
   const root = document.getElementById('demo-panel');
   if (!root) return;
 
-  const PROC = [
-    ['identityVerified', '실명확인'],
-    ['hasDepositAccount', '입출금 계좌'],
-    ['certRegistered', '인증서'],
-    ['kycDone', '고객정보'],
-    ['fxRegistered', '외환거래'],
-    ['hasFxAccount', '외화 계좌'],
-    ['investorProfiled', '투자성향'],
-  ];
-
   root.innerHTML =
     '<div class="dp-head"><div><div class="dp-head__title">시연</div></div>' +
     '<button class="dp-btn dp-btn--primary" data-dp="reset">처음부터</button></div>' +
@@ -36,18 +26,32 @@
   root.addEventListener('click', (e) => {
     const b = e.target.closest('[data-dp]');
     if (!b) return;
-    if (b.dataset.dp === 'reset') WSP.app.resetDemo();
-    if (b.dataset.dp === 'summarize') WSP.joinFlow.summarizeRemaining();
+    if (b.dataset.dp === 'reset') {
+      setProfile({ personaDone: false });
+      WSP.app.resetDemo();
+    }
     if (b.dataset.dp === 'preset') applyPreset(b.dataset.id);
     if (b.dataset.dp === 'debt-toggle') setProfile({ debtOn: !profile.debtOn, debt: profile.debtOn ? 0 : profile.debt || 30000000 });
     if (b.dataset.dp === 'profile-reset') setProfile({ income: 3500000, expense: 2100000, debtOn: false, debt: 0 });
-    if (b.dataset.dp === 'scene') {
-      if (b.dataset.go === 'products') WSP.ui.navigate('products');
-      if (b.dataset.go === 'home') WSP.ui.navigate('home', {}, { resetHistory: true });
-      if (b.dataset.go === 'lumpsum') WSP.lumpsumFlow.open();
-    }
+    if (b.dataset.dp === 'persona-ok') setProfile({ personaDone: true });
+    if (b.dataset.dp === 'persona-edit') setProfile({ personaDone: false });
   });
 
+  /** 슬라이더를 끄는 동안: 패널을 다시 그리지 않고 값 글자와 월 여유만 바꾼다 */
+  root.addEventListener('input', (e) => {
+    const t = e.target;
+    const field = t.dataset && t.dataset.dpField;
+    if (!field) return;
+    const v = Number(t.value) * 10000;
+    const strong = t.parentElement && t.parentElement.querySelector('strong');
+    if (strong) strong.textContent = WSP.utils.formatMan(v);
+    const live = Object.assign({}, profile);
+    live[field] = v;
+    const spare = root.querySelector('.dp-spare');
+    if (spare) spare.textContent = personaSummary(live).lines[3];
+  });
+
+  /** 슬라이더를 놓았을 때: 값을 저장하고 앱에 반영한다 */
   root.addEventListener('change', (e) => {
     const t = e.target;
     if (t.dataset.dpField === 'income') setProfile({ income: Number(t.value) * 10000 });
@@ -56,15 +60,16 @@
   });
 
   const PROFILE_KEY = 'wsp.demoProfile.v1';
+  const BASE = { income: 3500000, expense: 2100000, debtOn: false, debt: 0, personaDone: false };
   let profile = loadProfile();
 
   function loadProfile() {
     try {
       const raw = sessionStorage.getItem(PROFILE_KEY);
-      if (!raw) return { income: 3500000, expense: 2100000, debtOn: false, debt: 0 };
-      return Object.assign({ income: 3500000, expense: 2100000, debtOn: false, debt: 0 }, JSON.parse(raw));
+      if (!raw) return Object.assign({}, BASE);
+      return Object.assign({}, BASE, JSON.parse(raw));
     } catch (e) {
-      return { income: 3500000, expense: 2100000, debtOn: false, debt: 0 };
+      return Object.assign({}, BASE);
     }
   }
 
@@ -97,6 +102,9 @@
       profile = loadProfile();
       applyProfile(profile);
     },
+    summary: personaSummary,
+    set: setProfile,
+    get: () => Object.assign({}, profile),
   };
 
   function slider(field, label, value, min, max, step, off) {
@@ -124,107 +132,99 @@
     );
   }
 
-  function customerCard(s) {
-    const c = s.customer;
-    const debt = profile.debtOn ? profile.debt : 0;
-    const spare = profile.income - profile.expense - WSP.lumpsumAdvisor.debtPayment(debt);
-    const hint = WSP.lumpsumFlow && WSP.lumpsumFlow.hint ? WSP.lumpsumFlow.hint() : { active: false, line: '', spoken: '', snapshot: '' };
+  /** 천만원 단위로 딱 떨어지면 "3천만원"처럼 읽기 쉽게 쓴다 */
+  function manText(n) {
+    const man = Number(n || 0) / 10000;
+    if (man >= 1000 && man % 1000 === 0 && man < 10000) return man / 1000 + '천만원';
+    return WSP.utils.formatMan(n);
+  }
+
+  /** 페르소나 요약 줄과 프리셋 이름. 값이 프리셋과 똑같을 때만 이름을 붙인다 */
+  function personaSummary(p) {
+    const debt = p.debtOn ? p.debt : 0;
+    const pay = WSP.lumpsumAdvisor.debtPayment(debt);
+    const f = WSP.utils.formatMan;
+    let preset = '';
+    if (p.income === 3500000 && p.expense === 2100000 && !p.debtOn) preset = '기본';
+    else if (p.income === 3500000 && p.expense === 3600000 && !p.debtOn) preset = '여유 없음';
+    else if (p.income === 3500000 && p.expense === 2100000 && p.debtOn && p.debt === 30000000) preset = '부채 있음';
+    return {
+      preset: preset,
+      lines: ['수입 ' + f(p.income), '지출 ' + f(p.expense), debt > 0 ? '부채 ' + manText(debt) + ' · 월 상환 ' + f(pay) : '부채 없음', '월 여유 ' + WSP.lumpsumAdvisor.manSigned(p.income - p.expense - pay)],
+    };
+  }
+
+  function hintLines() {
+    const hint = WSP.lumpsumFlow && WSP.lumpsumFlow.hint ? WSP.lumpsumFlow.hint() : { active: false, line: '', spoken: '', decision: '' };
     return (
-      '<section class="dp-card dp-card--who"><p class="dp-kicker">고객 정보</p><h2>' +
-      esc(c.name) +
-      ' · ' +
-      c.age +
-      '세</h2><div class="dp-slides">' +
-      slider('income', '월급', profile.income, 150, 800, 10, false) +
-      slider('expense', '지출', profile.expense, 50, 700, 10, false) +
-      '<button type="button" class="dp-btn' +
-      (profile.debtOn ? ' dp-btn--primary' : '') +
-      '" data-dp="debt-toggle">부채 있음</button>' +
-      slider('debt', '부채 잔액', debt, 0, 10000, 100, !profile.debtOn) +
-      '<p class="dp-spare">월 여유 ' +
-      esc(WSP.utils.formatMan(spare)) +
-      '</p><div class="dp-presets"><button type="button" data-dp="preset" data-id="base">기본</button><button type="button" data-dp="preset" data-id="spend">여유 없음</button><button type="button" data-dp="preset" data-id="debt">부채 있음</button><button type="button" data-dp="profile-reset">기본값</button></div>' +
       (hint.active ? '<p class="dp-hint">' + esc(hint.line) + '</p>' : '') +
       (hint.spoken ? '<p class="dp-spoken">' + esc(hint.spoken) + '</p>' : '') +
-      (hint.decision ? '<p class="dp-snap">' + esc(hint.decision) + '<br />새 채팅부터 반영돼요</p>' : hint.active ? '<p class="dp-snap">새 채팅부터 반영돼요</p>' : '') +
-      '<div class="dp-scenes"><button type="button" data-dp="scene" data-go="products">상품 페이지</button><button type="button" data-dp="scene" data-go="home">홈 복귀</button><button type="button" data-dp="scene" data-go="lumpsum">AI 상담 진입</button></div><p class="dp-acct">해외계좌 ' +
-      (s.facts.hasFxAccount === true ? '있음' : '없음') +
-      '</p></section>'
+      (hint.decision ? '<p class="dp-snap">' + esc(hint.decision) + '<br />새 채팅부터 반영돼요</p>' : hint.active ? '<p class="dp-snap">새 채팅부터 반영돼요</p>' : '')
     );
   }
 
-  function gapText(info, key) {
-    if (!info || !info.items || !info.items[key]) return '아직 모름';
-    if (info.declined && info.declined.indexOf(key) !== -1) return '답하지 않음';
-    const value = info.items[key].value;
-    if (value == null) return '아직 모름';
-    if (Number(value) === 0) return '없음';
-    if (Number(value) > 0) return WSP.utils.formatWon(value);
-    return '아직 모름';
+  function customerCard(s) {
+    const c = s.customer;
+    const debt = profile.debtOn ? profile.debt : 0;
+    const sum = personaSummary(profile);
+    const who = esc(c.name) + ' · ' + c.age + '세';
+    if (profile.personaDone) {
+      return (
+        '<section class="dp-card dp-card--who is-done"><p class="dp-kicker">고객 정보' +
+        (sum.preset ? ' <span class="dp-tag">' + esc(sum.preset) + '</span>' : '') +
+        '</p><h2>' +
+        who +
+        '</h2><ul class="dp-sum">' +
+        sum.lines.map((l) => '<li>' + esc(l) + '</li>').join('') +
+        '</ul><button type="button" class="dp-edit" data-dp="persona-edit" aria-expanded="false">바꾸기<i class="dp-edit__chev" aria-hidden="true"></i></button>' +
+        hintLines() +
+        '</section>'
+      );
+    }
+    return (
+      '<section class="dp-card dp-card--who"><p class="dp-kicker">페르소나 만들기</p><h2>' +
+      who +
+      '</h2><div class="dp-slides"><div class="dp-persona-grid">' +
+      slider('income', '수입', profile.income, 150, 800, 10, false) +
+      '<button type="button" class="dp-btn' +
+      (profile.debtOn ? ' dp-btn--primary' : '') +
+      '" data-dp="debt-toggle">부채 있음</button>' +
+      slider('expense', '지출', profile.expense, 50, 700, 10, false) +
+      slider('debt', '부채 잔액', debt, 0, 10000, 100, !profile.debtOn) +
+      '</div><p class="dp-spare">' +
+      esc(sum.lines[3]) +
+      '</p><div class="dp-presets"><button type="button" data-dp="preset" data-id="base">기본</button><button type="button" data-dp="preset" data-id="spend">여유 없음</button><button type="button" data-dp="preset" data-id="debt">부채 있음</button><button type="button" data-dp="profile-reset">기본값</button></div>' +
+      '<button type="button" class="dp-btn dp-btn--primary dp-confirm" data-dp="persona-ok">이 설정으로 할게요</button>' +
+      hintLines() +
+      '</section>'
+    );
   }
 
-  function paceText(info) {
-    if (!info || !info.items || !info.items.investPace) return '아직 모름';
-    if (info.declined && info.declined.indexOf('investPace') !== -1) return '답하지 않음';
-    const value = info.items.investPace.value;
-    if (value == null) return '아직 모름';
-    return WSP.assetAdvisor.display('investPace', value);
-  }
-
-  function situation(a) {
-    const info = a && a.info;
-    const rows = [
-      ['목표', a && a.goalText ? a.goalText : '아직 없음'],
-      ['투자 속도', paceText(info)],
-      ['다른 증권 투자금', gapText(info, 'investAssets')],
-      ['목돈 지출 계획', gapText(info, 'plannedLumpSum')],
-    ];
+  function situation(s) {
+    const sess = WSP.app.session;
+    const apps = Object.keys(s.applications)
+      .map((k) => s.applications[k])
+      .filter((a) => a.productId === SC.DEMO.productId);
+    const info = WSP.goalInfo.describe({
+      lumpsum: sess.lumpsum,
+      lumpsumState: WSP.app.fsms.lumpsum.state,
+      asset: sess.asset,
+      assetState: WSP.app.fsms.asset.state,
+      applied: apps.some((a) => a.status === 'PENDING' || a.status === 'UNKNOWN' || a.status === 'SUCCESS'),
+      hasFxAccount: s.facts.hasFxAccount,
+    });
     return (
       '<section class="dp-card"><h2>해결패스가 알고 있는 정보</h2><div class="dp-nums dp-nums--lines">' +
-      rows.map((c) => '<div class="dp-num"><span>' + esc(c[0]) + '</span><strong>' + esc(c[1]) + '</strong></div>').join('') +
+      info.rows
+        .map((c) => '<div class="dp-num"><span>' + esc(c.label) + '</span><strong>' + esc(c.value) + '</strong></div>' + (c.note ? '<p class="dp-note">“' + esc(c.note) + '”</p>' : ''))
+        .join('') +
       '</div></section>'
     );
   }
 
-  function procedures(s) {
-    const apps = Object.keys(s.applications)
-      .map((k) => s.applications[k])
-      .filter((a) => a.productId === SC.DEMO.productId);
-    const opened = apps.some((a) => a.status === 'SUCCESS');
-    const items = PROC.map((p) => ({ label: p[1], ok: s.facts[p[0]] === true, pending: !!s.pending[p[0]] }));
-    items.push({ label: '계좌 개설', ok: opened, pending: apps.some((a) => a.status === 'PENDING' || a.status === 'UNKNOWN') });
-    let marked = false;
-    const html = items
-      .map((it) => {
-        let cls = it.ok ? 'is-done' : '';
-        if (!it.ok && !marked) {
-          marked = true;
-          cls = 'is-cur';
-        }
-        return '<li class="' + cls + '">' + (it.ok ? '✓' : it.pending ? '…' : '') + ' ' + esc(it.label) + '</li>';
-      })
-      .join('');
-    const next = items.find((it) => !it.ok);
-    const ready = remainReady(s);
-    return (
-      '<section class="dp-card"><h2>가입까지 남은 절차</h2><ul class="dp-proc">' +
-      html +
-      '</ul>' +
-      (next ? '<p class="dp-next">다음: ' + esc(next.label) + '</p>' : '<p class="dp-next">해외주식 계좌 개설 신청이 접수됐어요.</p>') +
-      '<button class="dp-btn dp-btn--primary" data-dp="summarize"' +
-      (ready ? '' : ' disabled') +
-      '>남은 절차 확인</button></section>'
-    );
-  }
-
-  function remainReady(s) {
-    const st = WSP.app.fsms.join.state;
-    return s.facts.fxRegistered === true && (st === 'OPTIONS_READY' || st === 'REMAINING');
-  }
-
   function sync() {
     const s = store.getState();
-    $('#dp-left').innerHTML = customerCard(s) + situation(WSP.app.session.asset) + procedures(s);
+    $('#dp-left').innerHTML = customerCard(s) + situation(s);
     $('#dp-right').innerHTML = '';
   }
 

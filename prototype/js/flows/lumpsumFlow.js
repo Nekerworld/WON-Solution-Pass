@@ -19,11 +19,18 @@
   let typeTimer = 0;
   let streamTimer = 0;
 
+  let pending = 0;
+
   function enqueue(fn) {
+    pending += 1;
     const run = tail.then(fn, fn);
     tail = run.then(
-      () => {},
-      () => {}
+      () => {
+        pending -= 1;
+      },
+      () => {
+        pending -= 1;
+      }
     );
     return run;
   }
@@ -68,6 +75,11 @@
       seed: hash(caseId),
       snap: snap,
       goal: null,
+      goalKind: '',
+      situationDone: false,
+      investFocus: false,
+      both: false,
+      stopStream: false,
       expText: '',
       lossText: '',
       advice: null,
@@ -98,7 +110,18 @@
   function push(msg) {
     const s = S();
     if (!s) return null;
-    const row = Object.assign({ id: s.caseId + '-' + (s.chat.length + 1), at: Date.now(), liked: false }, msg);
+    const row = Object.assign({ id: s.caseId + '-' + (s.chat.length + 1), at: Date.now() }, msg);
+    if (row.role === 'ai') {
+      if (!row.blocks) row.blocks = [{ t: 'text', text: row.text || '' }];
+      row.text = row.blocks
+        .filter((b) => b.t === 'text')
+        .map((b) => b.text)
+        .join('\n\n');
+      row.shown = 0;
+      row.cur = -1;
+      row.curText = '';
+      row.open = false;
+    }
     s.chat.push(row);
     return row;
   }
@@ -107,8 +130,20 @@
     const inp = document.getElementById('lumpsum-input');
     if (!inp || !S()) return;
     inp.value = S().draft || '';
+    if (UI().autoGrow) UI().autoGrow(inp);
     const send = document.querySelector('[data-action="lumpsum-send"]');
     if (send) send.classList.toggle('is-hot', !!S().typing || !!(S().draft && S().draft.length));
+    const bar = inp.closest('.chat-input');
+    if (bar) {
+      const typing = !!S().typing;
+      bar.classList.toggle('is-typing', typing);
+      let caret = bar.querySelector('.type-caret');
+      if (typing && !caret && send) {
+        caret = document.createElement('i');
+        caret.className = 'type-caret';
+        send.parentNode.insertBefore(caret, send);
+      } else if (!typing && caret) caret.remove();
+    }
   }
 
   function refresh() {
@@ -119,12 +154,10 @@
     const s = S();
     if (!s) return;
     const st = fsm().state;
-    const mainGoal = LA.GOALS['goal-100'].text;
-    const mainExp = LA.EXPERIENCE['exp-1'].text;
-    const mainLoss = LA.LOSS['loss-1'].text;
+    const T = LS.TYPED;
     let prompt = { mode: 'wait', typeText: '', choices: [], spoken: false, demoChoice: '' };
-    if (st === 'INTRO') prompt = { mode: 'type', typeText: LS.OPENING, choices: [], spoken: false, demoChoice: '' };
-    else if (st === 'GOAL') prompt = { mode: 'choice', typeText: mainGoal, choices: LS.goalChoices(), spoken: false, demoChoice: '3년 안에 1억' };
+    if (st === 'INTRO') prompt = { mode: 'type', typeText: T.INTRO, choices: LS.introChoices(), spoken: false, demoChoice: '' };
+    else if (st === 'GOAL') prompt = { mode: 'choice', typeText: T.GOAL, choices: LS.goalChoices(), spoken: false, demoChoice: '3년 안에 1억' };
     else if (st === 'DEBT_CHECK')
       prompt = {
         mode: 'type',
@@ -133,12 +166,15 @@
         spoken: true,
         demoChoice: '',
       };
-    else if (st === 'PROFILING') prompt = { mode: 'choice', typeText: mainExp, choices: LS.experienceChoices(), spoken: false, demoChoice: '소액으로 ETF' };
-    else if (st === 'LOSS') prompt = { mode: 'type', typeText: mainLoss, choices: LS.lossChoices(), spoken: false, demoChoice: '' };
+    else if (st === 'PROFILING') prompt = { mode: 'choice', typeText: T.PROFILING, choices: LS.experienceChoices(), spoken: false, demoChoice: '소액으로 ETF' };
+    else if (st === 'LOSS') prompt = { mode: 'type', typeText: T.LOSS, choices: LS.lossChoices(), spoken: false, demoChoice: '' };
     else if (st === 'RECOMMEND') {
       const showLev = !!(s.advice && s.advice.leverage);
-      prompt = { mode: 'choice', typeText: '해외주식', choices: LS.productChoices(showLev), spoken: false, demoChoice: '해외주식' };
-    } else if (st === 'NO_ACCOUNT') prompt = { mode: 'choice', typeText: '응, 개설해 주세요', choices: LS.openChoices(), spoken: false, demoChoice: '응, 개설해 주세요' };
+      prompt = { mode: 'choice', typeText: T.RECOMMEND, choices: LS.productChoices(showLev), spoken: false, demoChoice: '해외주식' };
+    } else if (st === 'NO_ACCOUNT') prompt = { mode: 'choice', typeText: T.NO_ACCOUNT, choices: LS.openChoices(), spoken: false, demoChoice: '네, 개설해 주세요' };
+    else if (st === 'SPEND_PLAN') prompt = { mode: 'choice', typeText: '', choices: LS.spendChoices(), spoken: false, demoChoice: '줄이기 목표로 저장' };
+    /* 타이핑은 선택지에 원하는 상황이 없을 때 쓴다. 선택지와 같은 문장은 타이핑하지 않는다 */
+    if (prompt.choices.some((c) => c.text === prompt.typeText)) prompt.typeText = '';
     s.prompt = prompt;
   }
 
@@ -157,6 +193,7 @@
           goalMonths: goal.months,
           expText: s.expText,
           lossText: s.lossText,
+          investFocus: s.investFocus,
         },
         extra || {}
       )
@@ -165,6 +202,7 @@
 
   function goalFrom(text, choiceId) {
     if (choiceId && LA.GOALS[choiceId]) return LA.GOALS[choiceId];
+    if (LA.GOAL_TYPED.text === text) return LA.GOAL_TYPED;
     const keys = Object.keys(LA.GOALS);
     for (let i = 0; i < keys.length; i++) {
       if (LA.GOALS[keys[i]].text === text) return LA.GOALS[keys[i]];
@@ -212,40 +250,62 @@
     return parts.filter((p) => p.length);
   }
 
-  async function streamInto(row, ep) {
-    const full = row.full || row.text || '';
-    row.full = full;
-    row.text = '';
-    row.streaming = true;
-    refresh();
+  /** 문장 블록 하나를 글자 흐름으로 보여 준다 */
+  async function streamText(row, idx, ep) {
+    const full = row.blocks[idx].text || '';
     const bits = tokensOf(full);
-    if (scale() === 0) {
-      row.text = full;
-      row.streaming = false;
-      refresh();
-      return !stale(ep);
-    }
+    row.cur = idx;
+    row.curText = '';
+    refresh();
     for (let i = 0; i < bits.length; i++) {
       if (stale(ep)) return false;
-      if (S().stopStream) {
-        row.text = full;
-        break;
-      }
-      row.text += bits[i];
-      const el = document.querySelector('[data-mid="' + row.id + '"] .msg__text');
+      if (S().stopStream) break;
+      row.curText += bits[i];
+      const el = document.querySelector('[data-mid="' + row.id + '"] [data-bi="' + idx + '"]');
       if (el) {
-        el.innerHTML = formatRich(row.text) + '<i class="stream-caret"></i>';
+        el.innerHTML = formatRich(row.curText) + '<i class="stream-caret"></i>';
         const body = document.getElementById('lumpsum-body');
         if (body && body.dataset.pin !== '0') UI().scrollToLatest(body);
       } else refresh();
       const pause = /[.!?。]|요$|다$/.test(bits[i]) ? 180 : 40 + (i % 4) * 18;
       await sleep(pause);
     }
-    row.text = full;
-    row.streaming = false;
-    if (S()) S().stopStream = false;
+    row.cur = -1;
+    row.curText = '';
+    row.shown = idx + 1;
     refresh();
     return !stale(ep);
+  }
+
+  /** 블록을 순서대로 하나씩 보여 준다. 카드와 드롭다운은 앞 블록이 끝난 뒤에 나온다 */
+  async function revealBlocks(row, ep) {
+    row.streaming = true;
+    row.shown = row.shown || 0;
+    if (scale() !== 0) {
+      for (let i = row.shown; i < row.blocks.length; i++) {
+        if (stale(ep)) return false;
+        const b = row.blocks[i];
+        if (S().stopStream) break;
+        if (b.t === 'text') {
+          if (!(await streamText(row, i, ep))) return false;
+        } else {
+          if (i > 0) await sleep(260);
+          if (stale(ep)) return false;
+          row.shown = i + 1;
+          refresh();
+          await sleep(b.t === 'steps' ? 700 * b.items.length + 300 : 420);
+        }
+        await sleep(140);
+      }
+    }
+    if (stale(ep)) return false;
+    row.cur = -1;
+    row.curText = '';
+    row.shown = row.blocks.length;
+    row.streaming = false;
+    S().stopStream = false;
+    refresh();
+    return true;
   }
 
   function formatRich(text) {
@@ -256,11 +316,10 @@
   }
 
   async function say(partial, kind, ep) {
-    if (!(await think(kind, ep))) return false;
+    if (kind && !(await think(kind, ep))) return false;
     if (stale(ep)) return false;
-    const row = push(Object.assign({ role: 'ai', thoughtMs: S().thoughtMs }, partial));
-    row.full = partial.text;
-    const ok = await streamInto(row, ep);
+    const row = push(Object.assign({ role: 'ai', thoughtMs: kind ? S().thoughtMs : 0 }, partial));
+    const ok = await revealBlocks(row, ep);
     if (S()) S().awaiting = '';
     return ok;
   }
@@ -286,16 +345,35 @@
     s.lock = true;
     const advice = currentAdvice();
     s.advice = advice;
-    const msg = LS.decisionMessage(advice, s.goal.text, s.seed);
+    const msg = LS.decisionMessage(advice);
     if (fsm().state === 'GOAL' && fsm().can('SENT')) fsm().transition('SENT');
     const ok = await say(msg, 'decision', ep);
     if (!ok) return;
-    if (advice.decisionId === 'SPEND_CHECK') {
-      if (fsm().can('STOP')) fsm().transition('STOP');
-      s.prompt = { mode: 'wait', typeText: '', choices: [], spoken: false, demoChoice: '' };
-    }
+    if (advice.decisionId === 'SPEND_CHECK' && fsm().can('PLAN')) fsm().transition('PLAN');
     s.lock = false;
     syncPrompt();
+    refresh();
+  }
+
+  /** 줄이기 목표를 저장하고 상담을 마친다. 저장값은 소비 분석 화면이 읽는다 */
+  async function replySaved(ep) {
+    const s = S();
+    s.awaiting = 'saved';
+    s.lock = true;
+    const advice = s.advice || currentAdvice();
+    const plan = LA.spendPlan(advice);
+    A().session.spendGoal = {
+      total: plan.total,
+      target: plan.target,
+      after: plan.after,
+      items: plan.items.map((it) => ({ id: it.id, category: it.category, label: it.label, saved: it.saved })),
+      savedAt: Date.now(),
+    };
+    const ok = await say(LS.savedMessage(advice), 'save', ep);
+    if (!ok) return;
+    if (fsm().can('DONE')) fsm().transition('DONE');
+    s.prompt = { mode: 'wait', typeText: '', choices: [], spoken: false, demoChoice: '' };
+    s.lock = false;
     refresh();
   }
 
@@ -303,8 +381,7 @@
     const s = S();
     s.awaiting = 'profile';
     s.lock = true;
-    const last = s.chat.filter((m) => m.role === 'user').pop();
-    const msg = mismatch ? LS.mismatchReply() : LS.afterSituation(s.advice || currentAdvice(), last ? last.text : '', s.seed);
+    const msg = mismatch ? LS.mismatchReply() : LS.afterSituation(s.advice || currentAdvice());
     if (fsm().state === 'DEBT_CHECK' && fsm().can('SENT')) fsm().transition('SENT');
     const ok = await say(msg, 'talk', ep);
     if (!ok) return;
@@ -355,8 +432,10 @@
     s.awaiting = 'noaccount';
     s.lock = true;
     if (fsm().can('OVERSEAS')) fsm().transition('OVERSEAS');
-    const ok = await say(LS.noAccount(), 'talk', ep);
+    const msg = s.both ? LS.bothMessage(s.advice || currentAdvice()) : LS.noAccount();
+    const ok = await say(msg, 'talk', ep);
     if (!ok) return;
+    s.both = false;
     s.lock = false;
     syncPrompt();
     refresh();
@@ -384,6 +463,36 @@
     else refresh();
   }
 
+  /** 채팅을 열면 AI가 먼저 목표를 묻는다. 생각 연출 없이 글자 흐름만 쓴다 */
+  async function replyGreeting(ep) {
+    const s = S();
+    s.awaiting = 'greeting';
+    s.lock = true;
+    refresh();
+    const ok = await say(LS.greeting(), null, ep);
+    if (!ok) return;
+    s.lock = false;
+    syncPrompt();
+    refresh();
+  }
+
+  /** 첫 질문 선택지는 이전 자산관리 상담으로 이어 간다 */
+  function toLegacy(text) {
+    const f = fsm();
+    if (f.can('EXIT')) f.transition('EXIT');
+    if (f.can('NEW_CASE')) f.transition('NEW_CASE');
+    clearType();
+    A().session.lumpsum = null;
+    const AF = WSP.assetFlow;
+    if (AF.start()) {
+      AF.agree();
+      AF.setGoal(text);
+    } else {
+      UI().navigate('asset', {}, { replace: true });
+      A().refresh(SCREENS);
+    }
+  }
+
   function continueAwaiting(ep) {
     const s = S();
     const kind = s.awaiting;
@@ -393,6 +502,8 @@
     if (kind === 'loss') return replyLoss(ep);
     if (kind === 'recommend') return replyRecommend(ep);
     if (kind === 'noaccount') return replyNoAccount(ep);
+    if (kind === 'greeting') return replyGreeting(ep);
+    if (kind === 'saved') return replySaved(ep);
     s.awaiting = '';
     s.lock = false;
     return Promise.resolve();
@@ -403,6 +514,10 @@
     if (!s || s.lock) return Promise.resolve();
     const spoken = (text || '').trim();
     if (!spoken) return Promise.resolve();
+    if (fsm().state === 'INTRO' && choiceId && String(choiceId).indexOf('intro-') === 0) {
+      toLegacy(spoken);
+      return Promise.resolve();
+    }
     clearType();
     s.typing = false;
     s.draft = '';
@@ -410,17 +525,27 @@
     const ep = A().epoch();
     const st = fsm().state;
     s.lock = true;
+    /* 답한 뒤에는 이전 질문의 선택지를 치운다. 응답이 끝나면 syncPrompt가 다음 선택지를 채운다 */
+    s.prompt = { mode: 'wait', typeText: '', choices: [], spoken: false, demoChoice: '' };
     refresh();
     return enqueue(async () => {
       if (stale(ep)) return;
-      if (st === 'INTRO') return replyAnalysis(ep);
+      if (st === 'INTRO') {
+        s.goalKind = 'LUMP_SUM';
+        return replyAnalysis(ep);
+      }
       if (st === 'GOAL') {
         s.goal = goalFrom(spoken, choiceId);
         return replyDecision(ep);
       }
       if (st === 'DEBT_CHECK') {
+        s.situationDone = true;
         const mismatch = choiceId && String(choiceId).indexOf('mis-') === 0;
+        if (!mismatch) s.investFocus = true;
         return replyAfterUser3(ep, mismatch);
+      }
+      if (st === 'SPEND_PLAN') {
+        return replySaved(ep);
       }
       if (st === 'PROFILING') {
         s.expText = spoken;
@@ -431,7 +556,16 @@
         return replyRecommend(ep);
       }
       if (st === 'RECOMMEND') {
-        if (choiceId === 'prod-os' || spoken === '해외주식') return replyNoAccount(ep);
+        if (!choiceId && /모두|둘 다|두 계좌|같이/.test(spoken)) {
+          s.goalKind = 'OVERSEAS_ACCOUNT';
+          s.both = true;
+          return replyNoAccount(ep);
+        }
+        if (choiceId === 'prod-os' || (!choiceId && /해외|미국/.test(spoken))) {
+          s.goalKind = 'OVERSEAS_ACCOUNT';
+          return replyNoAccount(ep);
+        }
+        s.goalKind = choiceId === 'prod-lev' ? 'LEVERAGE' : 'DOMESTIC_STOCK';
         return replySide(ep, choiceId || 'prod-dom');
       }
       if (st === 'NO_ACCOUNT') {
@@ -452,7 +586,8 @@
     typeTimer = 0;
   }
 
-  function onBlankClick() {
+  /** 입력창을 눌렀을 때만 호출한다. 선택지에 원하는 상황이 없을 때 보여 주는 타이핑이다 */
+  function startTyping() {
     const s = S();
     if (!s || s.lock || s.typing || !s.prompt || !s.prompt.typeText) return;
     if (scale() === 0) {
@@ -524,6 +659,17 @@
     syncPrompt();
     A().refresh(SCREENS);
     UI().navigate('lumpsum');
+    const s = S();
+    if (scale() === 0) {
+      push({ role: 'ai', blocks: LS.greeting().blocks, thoughtMs: 0 });
+      s.chat[0].shown = s.chat[0].blocks.length;
+      refresh();
+    } else {
+      const ep = A().epoch();
+      s.awaiting = 'greeting';
+      s.lock = true;
+      enqueue(() => replyGreeting(ep));
+    }
     return true;
   }
 
@@ -538,8 +684,11 @@
   function resume() {
     const s = S();
     if (!s) return;
+    if (pending > 0) return;
     s.typing = false;
     s.thinking = false;
+    s.stopStream = false;
+    s.chat = s.chat.filter((m) => !m.streaming);
     if (s.awaiting) {
       const ep = A().epoch();
       s.lock = false;
@@ -556,23 +705,11 @@
     if (!s || f.state === 'IDLE') return { active: false, line: '', spoken: '', decision: '' };
     const p = s.prompt || {};
     let line = '';
-    if (p.mode === 'type' && p.typeText) line = '빈 곳을 눌러 타이핑: ' + p.typeText;
-    else if (p.mode === 'choice') line = '선택지를 누르세요: ' + (p.demoChoice || '');
+    if (p.mode === 'type' && p.typeText) line = '입력창을 눌러 타이핑: ' + p.typeText;
+    else if (p.mode === 'choice') line = '선택지를 누르세요: ' + (p.demoChoice || '') + (p.typeText ? ' · 맞는 게 없으면 입력창 타이핑: ' + p.typeText : '');
     const decision = s.advice ? '이번 채팅: ' + (DECISION_LABEL[s.advice.decisionId] || s.advice.decisionId) + ' · 월 여유 ' + man(Math.max(0, s.advice.surplus)) : '';
     const active = ['IDLE', 'CLOSED', 'TO_JOIN'].indexOf(f.state) === -1;
     return { active: active, line: line, spoken: p.spoken ? '우리 상황에 맞는 게 없네요?' : '', decision: decision };
-  }
-
-  function regenerate(id) {
-    const s = S();
-    if (!s || s.lock) return;
-    const row = s.chat.filter((m) => m.id === id && m.role === 'ai').pop();
-    if (!row || !row.full) return;
-    const ep = A().epoch();
-    s.lock = true;
-    enqueue(() => streamInto(row, ep).then(() => {
-      if (S()) S().lock = false;
-    }));
   }
 
   WSP.lumpsumFlow = {
@@ -580,43 +717,46 @@
     startNew: startNew,
     resume: resume,
     accept: accept,
-    onBlankClick: onBlankClick,
+    startTyping: startTyping,
     finishTypeNow: finishTypeNow,
     hint: hint,
-    regenerate: regenerate,
     formatRich: formatRich,
     decisionLabel: DECISION_LABEL,
   };
 
+  /* 타이핑은 입력창을 눌렀을 때만 시작한다. 말풍선·빈 화면·다른 버튼을 눌러서는 시작하지 않는다 */
   document.addEventListener('click', (e) => {
-    const screen = document.querySelector('[data-screen="lumpsum"]');
-    if (!screen || !screen.contains(e.target)) return;
-    if (e.target.closest('[data-action], button, a, .bottom-nav, .appbar, .msg-tools')) return;
-    onBlankClick();
+    const field = e.target && e.target.closest ? e.target.closest('[data-screen="lumpsum"] .chat-input__field') : null;
+    if (!field) return;
+    if (e.target.closest('[data-action]')) return;
+    startTyping();
   });
 
   document.addEventListener('keydown', (e) => {
-    const screen = document.querySelector('[data-screen="lumpsum"]');
-    if (!screen) return;
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    if (e.target && e.target.closest && e.target.closest('input, textarea, button')) return;
+    if (e.key !== 'Enter') return;
+    const t = e.target;
+    if (!t || t.id !== 'lumpsum-input') return;
     e.preventDefault();
-    onBlankClick();
+    if (S() && S().typing) finishTypeNow();
+    else startTyping();
   });
 
   WSP.registerActions({
     'lumpsum-send'() {
       const s = S();
       if (!s) return;
-      if (s.streamingStop) return;
       if (s.chat.some((m) => m.streaming)) {
         s.stopStream = true;
         return;
       }
       if (s.typing) return finishTypeNow();
-      if (s.prompt && s.prompt.typeText) return accept(s.prompt.typeText, null);
+      startTyping();
     },
     'lumpsum-choice'(d) {
+      if (d.id === 'spend-view') {
+        if (fsm().state === 'SPEND_PLAN') UI().navigate('spend');
+        return;
+      }
       const text = textOf(d.id, d.label);
       return accept(text, d.id);
     },
@@ -633,23 +773,12 @@
       A().session.lumpsum = null;
       UI().navigate('home', {}, { resetHistory: true, back: true });
     },
-    'lumpsum-like'(d) {
+    'lumpsum-toggle'(d) {
       const s = S();
       if (!s) return;
       const row = s.chat.filter((m) => m.id === d.id).pop();
-      if (row) row.liked = !row.liked;
+      if (row) row.open = !row.open;
       refresh();
-    },
-    'lumpsum-copy'(d) {
-      const s = S();
-      if (!s) return;
-      const row = s.chat.filter((m) => m.id === d.id).pop();
-      const text = row ? row.full || row.text : '';
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text);
-      UI().toast('복사했어요.');
-    },
-    'lumpsum-again'(d) {
-      regenerate(d.id);
     },
   });
 })();

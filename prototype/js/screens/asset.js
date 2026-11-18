@@ -70,6 +70,8 @@
   }
 
   const GOAL_CHIPS = ['해외주식 투자를 처음 시작해 보고 싶어요', '결혼 자금 3천만원을 3년 안에 모으고 싶어요', '비상자금이 충분한지 알고 싶어요'];
+  /* 목돈 상담 첫 화면도 같은 선택지를 쓴다 */
+  WSP.assetGoalChips = GOAL_CHIPS.slice();
 
   function freshReply(chat) {
     const last = chat && chat[chat.length - 1];

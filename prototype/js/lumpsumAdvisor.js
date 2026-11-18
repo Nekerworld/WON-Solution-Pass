@@ -20,6 +20,9 @@
     'goal-20': { amount: 20000000, months: 12, text: '1년 안에 2천만 원 만들고 싶어요' },
   });
 
+  /** 선택지에 없는 목표를 직접 입력할 때 쓰는 문장 */
+  const GOAL_TYPED = Object.freeze({ amount: 80000000, months: 36, text: '3년 안에 8천만 원 정도 만들고 싶어요' });
+
   const EXPERIENCE = Object.freeze({
     'exp-0': { score: 0, text: '주식은 해본 적 없어요' },
     'exp-1': { score: 1, text: '소액으로 ETF 조금 해봤어요' },
@@ -138,6 +141,99 @@
     return { label: label, value: value, note: note || '', tone: tone || '' };
   }
 
+  /** 음수도 만원 단위로 쓴다. -100000 → "-10만원" */
+  function manSigned(n) {
+    const v = Number(n) || 0;
+    return (v < 0 ? '-' : '') + WSP.utils.formatMan(Math.abs(v));
+  }
+
+  /**
+   * 줄이기 후보. 노력이 적게 드는 순서(effort)로 담는다.
+   * rate는 해당 항목 지출에서 줄일 수 있는 비율이다. 주거·관리와 교통은 고정비라 후보가 아니다.
+   */
+  const CUT_POOL = Object.freeze([
+    { id: 'subs', category: '문화·여가', label: '구독 서비스 정리', rate: 0.3, effort: 1, reason: '자주 안 쓰는 구독부터 정리하면 생활 불편이 거의 없어요' },
+    { id: 'impulse', category: '쇼핑', label: '충동구매 줄이기', rate: 0.3, effort: 2, reason: '월 후반에 몰려 있어서 줄이기 가장 쉬워요' },
+    { id: 'delivery', category: '식비', label: '배달 횟수 줄이기', rate: 0.1, effort: 3, reason: '배달을 조금만 줄여도 금액이 커요' },
+    { id: 'small', category: '기타', label: '소액 결제 정리', rate: 0.2, effort: 4, reason: '건별 금액은 작지만 모이면 커져요' },
+  ]);
+  const FIXED_CATEGORIES = Object.freeze(['주거·관리', '교통']);
+  const SPARE_GOAL = 100000;
+
+  /**
+   * 지출 줄이기 계획. 부족한 금액에 여유 목표(10만원)를 더한 만큼만 줄인다.
+   * 후보를 노력 순으로 담다가 필요한 금액에 닿으면 멈추고, 마지막 후보는 필요한 만큼으로 줄인다. 금액은 만원 단위다.
+   * 반환: items[{id,category,label,reason,rate,amount,saved,trimmed}], target, total, after, enough
+   */
+  function spendPlan(a, targetOverride) {
+    const cats = a.categories || [];
+    const target = targetOverride != null ? roundMan(Math.max(0, targetOverride)) : roundMan(Math.max(0, -a.surplus) + SPARE_GOAL);
+    const items = [];
+    let total = 0;
+    CUT_POOL.slice()
+      .sort((x, y) => x.effort - y.effort)
+      .forEach((p) => {
+        if (total >= target) return;
+        const c = cats.filter((x) => x.label === p.category)[0];
+        if (!c) return;
+        const full = roundMan(c.amount * p.rate);
+        if (full <= 0) return;
+        const need = roundMan(target - total);
+        const saved = Math.min(full, need);
+        if (saved <= 0) return;
+        items.push({ id: p.id, category: p.category, label: p.label, reason: p.reason, rate: p.rate, amount: c.amount, saved: saved, trimmed: saved < full });
+        total += saved;
+      });
+    const after = a.surplus + total;
+    return { items: items, target: target, total: total, after: after, enough: after > 0 };
+  }
+
+  /**
+   * 적금 + 투자 제안(MIX)에서 소비를 줄이면 필요한 연 수익이 얼마나 내려가는지 계산한다.
+   * 줄일 목표는 적금만으로 목표를 메우는 데 부족한 월 저축액이고, 후보 풀이 담을 수 있는 만큼만 줄인다.
+   * 반환: plan(spendPlan 결과), yieldBefore, yieldAfter(연 수익률 소수), 없으면 null
+   */
+  function cutForYield(a) {
+    if (a.decisionId !== 'MIX') return null;
+    const saveMonthly = Math.max(0, a.surplus);
+    const extra = roundMan(Math.max(0, a.requiredMonthly - saveMonthly));
+    if (extra <= 0) return null;
+    const plan = spendPlan(a, extra);
+    if (plan.total <= 0) return null;
+    const yieldBefore = requiredYield(saveMonthly, a.deposit, a.goalMonths, a.goalAmount);
+    const yieldAfter = requiredYield(saveMonthly + plan.total, a.deposit, a.goalMonths, a.goalAmount);
+    return { plan: plan, extra: extra, yieldBefore: yieldBefore, yieldAfter: yieldAfter };
+  }
+
+  /** 지난달 대비 증감(%). 이번 달 지출 = 지난달 × (1 + 증감) */
+  const MONTH_CHANGE = Object.freeze({ 식비: 4, '주거·관리': 1, 교통: -2, 쇼핑: 12, '문화·여가': 9, 기타: -3 });
+  const INSIGHT_SOURCE = '최근 3개월 카드·계좌 거래 기준';
+
+  /**
+   * 소비 분석 화면과 같은 방식의 요약. 페르소나의 지출에서 고정 비율로 계산한다.
+   * 반환: source, rows[{label,amount,prev,changePct}], tags[{id,text}], 패턴 숫자
+   */
+  function spendInsight(a) {
+    const cats = a.categories || [];
+    const rows = cats.map((c) => {
+      const pct = MONTH_CHANGE[c.label] || 0;
+      return { label: c.label, ratio: c.ratio, amount: c.amount, prev: Math.round(c.amount / (1 + pct / 100) / 1000) * 1000, changePct: pct };
+    });
+    const by = (label) => cats.filter((c) => c.label === label)[0] || { amount: 0 };
+    const subsAmount = Math.max(10000, roundMan(by('문화·여가').amount * 0.5));
+    const deliveryCount = Math.max(1, Math.round((by('식비').amount * 0.4) / 25000));
+    const weekendShare = 41;
+    const lateShopping = 62;
+    const subsCount = 4;
+    const tags = [
+      { id: 'weekend', text: '주말 소비 비중 ' + weekendShare + '%' },
+      { id: 'subs', text: '정기결제 ' + subsCount + '건 · 월 ' + WSP.utils.formatMan(subsAmount) },
+      { id: 'late', text: '쇼핑 ' + lateShopping + '% 월 후반 집중' },
+      { id: 'delivery', text: '배달·외식 월 ' + deliveryCount + '회' },
+    ];
+    return { source: INSIGHT_SOURCE, rows: rows, tags: tags, weekendShare: weekendShare, lateShopping: lateShopping, subsCount: subsCount, subsAmount: subsAmount, deliveryCount: deliveryCount };
+  }
+
   /**
    * @param {{income:number,expense:number,debt:number,deposit:number,goalAmount:number,goalMonths:number,expText?:string,lossText?:string}} input
    */
@@ -173,20 +269,20 @@
     let share = PROFILE_SHARE[profile.id] || PROFILE_SHARE.NEUTRAL;
     if (decisionId === 'EMERGENCY_FIRST') share *= 0.5;
     if (decisionId === 'SAVINGS_ENOUGH') share *= 0.35;
+    if (input.investFocus && (decisionId === 'MIX' || decisionId === 'SAVINGS_ENOUGH' || decisionId === 'DEBT_FIRST')) share = Math.min(0.85, share + 0.15);
     const investBase = decisionId === 'SPEND_CHECK' ? 0 : Math.max(0, surplus);
     const monthlyInvest = roundMan(investBase * share);
     const split = PROFILE_SPLIT[profile.id] || PROFILE_SPLIT.NEUTRAL;
 
-    const analysisFigs = [
-      fig('월급', man(income), ''),
-      fig('지출', man(expense), ''),
-      fig('월 여유', man(Math.max(0, before)), surplus <= 0 ? '지출이 월급보다 많아요' : '', surplus <= 0 ? 'warning' : ''),
+    const incomeFigs = [fig('평균 수입', man(income), ''), fig('평균 지출', man(expense), '')];
+    const balanceFigs = [
+      fig('월평균 여유 자금', man(Math.max(0, before)), before <= 0 ? '지출이 월급보다 많아요' : '', before <= 0 ? 'warning' : ''),
+      fig('예적금 및 현금', man(deposit), '생활비 ' + emergencyMonths + '개월치', emergencyMonths < EMERGENCY_MIN ? 'warning' : ''),
     ];
-    const reserveFigs = [fig('비상자금', emergencyMonths + '개월', '예금 ' + man(deposit), emergencyMonths < EMERGENCY_MIN ? 'warning' : '')];
 
     let decisionFigs = [];
     if (decisionId === 'SPEND_CHECK') {
-      decisionFigs = [fig('월급', man(income), ''), fig('지출', man(expense), ''), fig('월 여유', man(surplus), '0원 이하', 'warning')];
+      decisionFigs = [fig('월급', man(income), ''), fig('지출', man(expense), ''), fig('월 여유', manSigned(surplus), '0원 이하', 'warning')];
     } else if (decisionId === 'DEBT_FIRST') {
       decisionFigs = [
         fig('갚기 전 월 여유', man(before), ''),
@@ -236,8 +332,9 @@
       monthlyInvest: monthlyInvest,
       domesticShare: split[0],
       overseasShare: split[1],
+      investFocus: !!input.investFocus,
       categories: categories(expense),
-      figures: { analysis: analysisFigs, reserve: reserveFigs, decision: decisionFigs.slice(0, 3), recommend: recommendFigs.slice(0, 3) },
+      figures: { income: incomeFigs, balance: balanceFigs, decision: decisionFigs.slice(0, 3), recommend: recommendFigs.slice(0, 3) },
     };
   }
 
@@ -266,9 +363,16 @@
     EMERGENCY_MIN: EMERGENCY_MIN,
     DEPOSIT_DEFAULT: DEPOSIT_DEFAULT,
     GOALS: GOALS,
+    GOAL_TYPED: GOAL_TYPED,
     EXPERIENCE: EXPERIENCE,
     LOSS: LOSS,
     debtPayment: debtPayment,
+    spendPlan: spendPlan,
+    cutForYield: cutForYield,
+    spendInsight: spendInsight,
+    FIXED_CATEGORIES: FIXED_CATEGORIES,
+    INSIGHT_SOURCE: INSIGHT_SOURCE,
+    manSigned: manSigned,
     inferRiskProfile: inferRiskProfile,
     advise: advise,
     defaultRequiredYield: defaultRequiredYield,

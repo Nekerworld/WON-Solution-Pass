@@ -55,8 +55,8 @@
       cards.push({ action: 'direct-open', tag: '직접 가입', title: SC.getProduct(s.direct.productId).name, desc: d[f.direct.state] || f.direct.state, tone: '' });
     }
     if (f.lumpsum && ['IDLE', 'CLOSED', 'TO_JOIN'].indexOf(f.lumpsum.state) === -1 && s.lumpsum) {
-      const lump = { INTRO: '첫 질문을 기다리고 있어요', ANALYZING: '소비를 분석하고 있어요', GOAL: '목표 금액을 기다리고 있어요', DEBT_CHECK: '상황에 맞는 질문을 기다리고 있어요', PROFILING: '투자 경험을 기다리고 있어요', LOSS: '손실 감내를 기다리고 있어요', RECOMMEND: '상품을 고르는 중이에요', NO_ACCOUNT: '해외계좌 개설을 확인하고 있어요' };
-      cards.push({ action: 'lumpsum-open', tag: 'AI 상담', title: '목돈 불리기', desc: lump[f.lumpsum.state] || '상담을 이어가는 중이에요', tone: '' });
+      const lump = { INTRO: '첫 질문을 기다리고 있어요', ANALYZING: '소비를 분석하고 있어요', GOAL: '목표 금액을 기다리고 있어요', DEBT_CHECK: '상황에 맞는 질문을 기다리고 있어요', SPEND_PLAN: '줄이기 계획을 확인하고 있어요', PROFILING: '투자 경험을 기다리고 있어요', LOSS: '손실 감내를 기다리고 있어요', RECOMMEND: '상품을 고르는 중이에요', NO_ACCOUNT: '해외계좌 개설을 확인하고 있어요' };
+      cards.push({ action: 'lumpsum-open', tag: 'AI 자산관리', title: '자산관리 상담', desc: lump[f.lumpsum.state] || '상담을 이어가는 중이에요', tone: '' });
     }
     if (['IDLE', 'CLOSED', 'TO_JOIN'].indexOf(f.asset.state) === -1 && s.asset) {
       const a = { CONSENT: '정보 이용 동의를 기다리고 있어요', GOAL: '상담 목표를 알려 주세요', ASKING: '질문에 답해 주세요', REVIEW: '제안을 검토해 주세요', NEXT_ACTION: '다음 행동을 골라 주세요', EXPLORE: '상품을 둘러보는 중', HOLD: '제안이 보류됐어요', RECONSULT: '정보를 다시 확인하는 중', HANDOFF: '상담 연결 중' };
@@ -189,7 +189,7 @@
         '<header class="w-top"><div class="w-top__icons">' +
         '<button data-action="noop" aria-label="지갑">' +
         I.wallet +
-        '</button><button class="w-top__ai" data-action="asset-start" aria-label="목돈 불리기 상담">' +
+        '</button><button class="w-top__ai" data-action="asset-start" aria-label="AI 자산관리 상담">' +
         I.ai +
         '</button><button data-action="noop" aria-label="알림">' +
         I.bell +
@@ -204,7 +204,7 @@
         resume +
         '<h3 class="w-h3">추천서비스</h3><div class="w-hscroll">' +
         '<div class="w-svc is-pink">' +
-        svcItem('asset-start', I.target, 'blue', '목돈 불리기 상담') +
+        svcItem('asset-start', I.target, 'blue', 'AI 자산관리 상담') +
         svcItem('go-products', I.product, 'violet', '상품 가입') +
         svcItem('noop', I.wallet, 'sky', '우리WON지갑') +
         '</div><div class="w-svc is-blue">' +
@@ -282,7 +282,7 @@
         icon +
         '</i></button>';
       return (
-        '<header class="w-mallbar"><h1>상품몰</h1><div class="w-top__icons"><button class="w-top__ai" data-action="asset-start" aria-label="목돈 불리기 상담">' +
+        '<header class="w-mallbar"><h1>상품몰</h1><div class="w-top__icons"><button class="w-top__ai" data-action="asset-start" aria-label="AI 자산관리 상담">' +
         I.ai +
         '</button><button data-action="noop" aria-label="장바구니">' +
         I.cart +
