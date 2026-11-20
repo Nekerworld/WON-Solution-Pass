@@ -74,7 +74,9 @@ class MockBank {
     return BankResult.success(AccountSummary(
       customerName: s.customer.name,
       hasDepositAccount: s.facts['hasDepositAccount'] == true,
-      account: s.facts['hasDepositAccount'] == true ? const AccountRef('WON 통장', '1002-***-731024') : null,
+      account: s.facts['hasDepositAccount'] == true
+          ? AccountRef('WON 통장', '1002-***-731024', balance: s.finance.items['liquidAssets']?.value ?? 0)
+          : null,
       fxAccount: s.facts['hasFxAccount'] == true ? const AccountRef('WON 외화통장(USD)', '1002-***-552190') : null,
       savings: [
         for (final a in s.applications.values)

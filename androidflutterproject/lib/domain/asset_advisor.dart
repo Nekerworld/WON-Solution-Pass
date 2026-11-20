@@ -28,6 +28,9 @@ const Map<String, ItemDef> items = {
   'goalMonths': ItemDef('목표 기간', 'months'),
   'plannedLumpSum': ItemDef('예정된 목돈 지출'),
   'monthlySavingPref': ItemDef('희망 월 적립액'),
+
+  /// 남는 돈 중 투자에 쓸 비율(%). 고객이 고른 값만 쓴다.
+  'investPace': ItemDef('투자 속도', 'pace'),
 };
 
 String itemLabel(String k) => items[k]?.label ?? k;
@@ -47,7 +50,7 @@ const Map<String, PurposeDef> purposes = {
   'INVEST': PurposeDef(
     label: '해외주식 투자 시작',
     critical: ['monthlyIncome', 'monthlyExpense', 'liquidAssets'],
-    important: ['investAssets', 'plannedLumpSum'],
+    important: ['investPace', 'investAssets', 'plannedLumpSum'],
     minimum: ['monthlyIncome', 'monthlyExpense'],
     tags: ['해외주식'],
   ),
@@ -64,6 +67,13 @@ const Map<String, PurposeDef> purposes = {
     important: ['monthlyIncome'],
     minimum: ['monthlyExpense'],
     tags: ['비상자금'],
+  ),
+  'ORIENT': PurposeDef(
+    label: '계좌 정보로 시작',
+    critical: ['monthlyExpense', 'liquidAssets'],
+    important: ['monthlyIncome'],
+    minimum: ['monthlyExpense'],
+    tags: [],
   ),
 };
 
@@ -83,7 +93,7 @@ const Map<String, AssetQuestion> questions = {
   'goalAmount': AssetQuestion(
     id: 'Q_GOAL_AMOUNT',
     key: 'goalAmount',
-    text: '목표 금액이 어느 정도인가요? 정확하지 않아도, 대략적인 범위여도 괜찮아요.',
+    text: '목표 금액이 어느 정도인가요?',
     why: '필요한 월 적립액을 계산하려면 목표 금액이 필요해요.',
     options: [('2천만원 정도', 20000000), ('3천만원 정도', 30000000), ('5천만원 정도', 50000000)],
   ),
@@ -114,6 +124,13 @@ const Map<String, AssetQuestion> questions = {
     text: '한 달 생활비는 보통 얼마 정도 쓰세요?',
     why: '연결된 기관에서 지출을 확인하지 못했어요.',
     options: [('150만원 정도', 1500000), ('200만원 정도', 2000000), ('250만원 정도', 2500000)],
+  ),
+  'investPace': AssetQuestion(
+    id: 'Q_PACE',
+    key: 'investPace',
+    text: '투자는 얼마나 공격적으로 하고 싶으세요?',
+    why: '남는 돈 중에서 투자에 쓸 비율을 정하는 데 필요해요.',
+    options: [('조금만', 30), ('보통으로', 50), ('공격적으로', 90)],
   ),
   'investAssets': AssetQuestion(
     id: 'Q_INVEST',
@@ -271,9 +288,20 @@ int? val(AssetInfo info, String key) => known(info, key) ? info.items[key]!.valu
 /// 3.8 → "3.8", 4.0 → "4"
 String numText(num v) => v == v.roundToDouble() ? '${v.round()}' : '$v';
 
+/// 투자 속도는 0~100%만 유효하다. 만원 단위로 잘못 저장된 값은 100%로 자른다.
+int? pacePercent(num? value) => value?.round().clamp(0, 100);
+
+/// 투자 속도(%)의 짧은 이름. 90 이상은 공격적이다.
+String paceName(num pct) => pct >= 90 ? '공격적' : (pct >= 50 ? '보통' : '조금만');
+
 String display(String key, num? value) {
   if (value == null) return '미확인';
-  if (items[key]?.kind == 'months') return value % 12 == 0 ? '${(value / 12).round()}년' : '${numText(value)}개월';
+  final kind = items[key]?.kind;
+  if (kind == 'months') return value % 12 == 0 ? '${(value / 12).round()}년' : '${numText(value)}개월';
+  if (kind == 'pace') {
+    final pct = pacePercent(value)!;
+    return '${paceName(pct)} · $pct%';
+  }
   return formatMan(value);
 }
 
@@ -287,8 +315,21 @@ String _withRo(String w) => josa(w, '로');
 int _roundDown(num v) => (v.round() / 10000).floor() * 10000;
 int _roundUp(num v) => (v.round() / 10000).ceil() * 10000;
 
+/// 화면에 보일 큰 금액은 만원 단위로 맞춘다 (예: 30,262,400원 → 3,026만원)
+int roundMan(num? v) => (math.max(0, v ?? 0) / 10000).round() * 10000;
+
 class Metric {
-  const Metric({required this.key, required this.label, required this.value, required this.text, required this.formula, required this.inputs, required this.uncertain});
+  const Metric({
+    required this.key,
+    required this.label,
+    required this.value,
+    required this.text,
+    required this.formula,
+    required this.inputs,
+    required this.uncertain,
+    this.share,
+    this.shareKnown = false,
+  });
   final String key;
   final String label;
   final num? value;
@@ -296,6 +337,10 @@ class Metric {
   final String formula;
   final List<String> inputs;
   final List<String> uncertain;
+
+  /// 월 투자 금액에만 있다: 남는 돈 중 투자 비율(%)과 고객이 고른 값인지
+  final int? share;
+  final bool shareKnown;
 }
 
 class Metrics {
@@ -319,7 +364,9 @@ Metrics computeMetrics(AssetInfo info) {
   List<String> uncertainOf(List<String> keys) =>
       [for (final k in keys) if (!known(info, k) || info.items[k]!.source == 'ESTIMATED' || info.items[k]!.source == 'UNKNOWN') k];
   final list = <Metric>[];
-  void add(String key, String label, num? value, String formula, List<String> inputs, [String Function(num)? fmt]) => list.add(Metric(
+  void add(String key, String label, num? value, String formula, List<String> inputs,
+          [String Function(num)? fmt, int? share, bool shareKnown = false]) =>
+      list.add(Metric(
         key: key,
         label: label,
         value: value,
@@ -327,6 +374,8 @@ Metrics computeMetrics(AssetInfo info) {
         formula: formula,
         inputs: inputs,
         uncertain: uncertainOf(inputs),
+        share: share,
+        shareKnown: shareKnown,
       ));
 
   final surplus = inc != null && exp != null ? inc - exp - dp : null;
@@ -343,8 +392,11 @@ Metrics computeMetrics(AssetInfo info) {
   add('needMonthly', '필요 월 적립액', need, '(모아야 할 총액 − 목표에 쓸 예금) ÷ 목표 기간', ['goalAmount', 'plannedLumpSum', 'liquidAssets', 'goalMonths']);
   final capacity = surplus != null ? _roundDown(math.max(0, surplus) * 0.7) : null;
   add('capacity', '무리 없는 월 적립 여력', capacity, '월 여유자금 × 70%', ['monthlyIncome', 'monthlyExpense', 'debtPayment']);
-  final invest = capacity != null ? _roundDown(capacity * 0.5) : null;
-  add('investMonthly', '월 투자 시작 금액', invest, '무리 없는 월 적립 여력 × 50%', ['monthlyIncome', 'monthlyExpense', 'debtPayment']);
+  final pace = pacePercent(val(info, 'investPace'));
+  final share = pace ?? 30;
+  final invest = surplus != null ? _roundDown(math.max(0, surplus) * share / 100) : null;
+  add('investMonthly', '월 투자 시작 금액', invest, '월 여유자금 × $share%${pace != null ? ' (고객이 고른 투자 속도)' : ' (투자 속도를 아직 모름)'}',
+      ['monthlyIncome', 'monthlyExpense', 'debtPayment', 'investPace'], null, share, pace != null);
   int? rec;
   if (pref != null) {
     rec = pref;
@@ -408,18 +460,22 @@ bool canAsk({required int questionsAsked, required bool stopRequested, required 
 }
 
 class Alternative {
-  const Alternative({required this.id, required this.label, required this.detail, required this.apply});
+  const Alternative({required this.id, required this.label, required this.detail, required this.apply, this.message});
   final String id;
   final String label;
   final String detail;
   final Map<String, int> apply;
 
-  Json toJson() => {'id': id, 'label': label, 'detail': detail, 'apply': apply};
+  /// 고르면 AI가 대신 말할 문장 (비상자금부터: 몇 개월이면 채워지는지)
+  final String? message;
+
+  Json toJson() => {'id': id, 'label': label, 'detail': detail, 'apply': apply, if (message != null) 'message': message};
   factory Alternative.fromJson(Json j) => Alternative(
         id: j['id'] as String? ?? '',
         label: j['label'] as String? ?? '',
         detail: j['detail'] as String? ?? '',
         apply: asJson(j['apply']).map((k, v) => MapEntry(k, asInt(v) ?? 0)),
+        message: j['message'] as String?,
       );
 }
 
@@ -504,11 +560,18 @@ ProposalBasis proposalBasis(AssetInfo info, String purposeId, Metrics metrics) {
   }
   final em = metrics['emergencyMonths'];
   if (em.value != null && em.value! < Policy.emergencyMonths) {
+    // 비상자금을 채우는 기간: 남겨 둘 금액과 지금 예금의 차이를 월 적립 여력으로 나눈다
+    final gap = math.max(0, (metrics['reserve'].value ?? 0) - (val(info, 'liquidAssets') ?? 0));
+    final save = metrics['capacity'].value ?? 0;
+    final fill = save > 0 && gap > 0
+        ? '매달 ${formatMan(save)}씩 예금에 모으면 ${(gap / save).ceil()}개월이면 생활비 ${Policy.emergencyMonths}개월치가 채워져요.'
+        : '지금 여유로는 비상자금을 채우기 어려워요. 지출을 먼저 줄여 보세요.';
     alternatives.add(Alternative(
       id: 'EMERGENCY_FIRST',
       label: '비상자금부터 채울게요',
       detail: '생활비 ${Policy.emergencyMonths}개월치가 기준인데, 지금은 ${em.text}치예요',
       apply: const {},
+      message: fill,
     ));
   }
   final watched = [...p.critical, ...p.important];
@@ -517,12 +580,13 @@ ProposalBasis proposalBasis(AssetInfo info, String purposeId, Metrics metrics) {
       if (watched.contains(k) && (!known(info, k) || (info.items[k]!.source != 'STATED' && info.items[k]!.source != 'BANK'))) k,
   ];
   final invest = purposeId == 'INVEST';
+  final accountLook = purposeId == 'EMERGENCY' || purposeId == 'ORIENT';
   return ProposalBasis(
     purposeId: purposes.containsKey(purposeId) ? purposeId : 'GOAL_SAVING',
     purpose: p.label,
     tags: p.tags,
-    monthly: (invest ? metrics['investMonthly'].value : metrics['recommendedMonthly'].value)?.round(),
-    months: invest ? null : months,
+    monthly: (invest ? metrics['investMonthly'].value : (accountLook ? null : metrics['recommendedMonthly'].value))?.round(),
+    months: invest || accountLook ? null : months,
     feasible: metrics.feasible,
     alternatives: alternatives,
     uncertain: uncertain,
@@ -560,19 +624,19 @@ List<Figure> interpretFigures(Metrics metrics, String purposeId) {
   }
 
   final em = Policy.emergencyMonths;
-  add('매달 남는 돈', metrics['surplus'], '월 ${metrics['surplus'].text}', '소득에서 생활비를 뺀 금액이에요');
+  add('매달 남는 돈', metrics['surplus'], '월 ${metrics['surplus'].text}');
   if (purposeId == 'EMERGENCY') {
-    add('바로 쓸 수 있는 예금', metrics['emergencyMonths'], '생활비 ${metrics['emergencyMonths'].text}치', '생활비 $em개월치가 기준이에요');
-    add('남겨 둘 비상자금', metrics['reserve'], metrics['reserve'].text, '생활비 $em개월치예요');
+    add('바로 쓸 수 있는 예금', metrics['emergencyMonths'], '생활비 ${metrics['emergencyMonths'].text}치');
+    add('남겨 둘 비상자금', metrics['reserve'], metrics['reserve'].text);
     return figs;
   }
-  add('무리 없이 모을 수 있는 돈', metrics['capacity'], '월 ${metrics['capacity'].text}', '남는 돈의 70% 정도예요');
   if (purposeId == 'INVEST') {
     final v = metrics['emergencyMonths'].value;
     final low = v != null && v < em;
-    add('바로 쓸 수 있는 예금', metrics['emergencyMonths'], '생활비 ${metrics['emergencyMonths'].text}치', '생활비 $em개월치가 기준이에요', low ? 'warning' : '');
+    add('바로 쓸 수 있는 예금', metrics['emergencyMonths'], '생활비 ${metrics['emergencyMonths'].text}치', '', low ? 'warning' : '');
     return figs;
   }
+  add('무리 없이 모을 수 있는 돈', metrics['capacity'], '월 ${metrics['capacity'].text}');
   final need = metrics['needMonthly'].value, cap = metrics['capacity'].value;
   final short = need != null && cap != null ? need - cap : null;
   final over = short != null && short > 0;
@@ -585,10 +649,16 @@ List<Figure> proposalFigures(ProposalBasis basis, Metrics metrics) {
   final monthly = basis.monthly;
   if (monthly == null) return [];
   if (basis.purposeId == 'INVEST') {
+    final pace = metrics['investMonthly'];
+    final sur = metrics['surplus'];
+    final note = pace.share != null && sur.value != null
+        ? '${pace.shareKnown ? paceName(pace.share!) : '속도를 아직 몰라'} · 남는 ${sur.text}의 ${pace.share}%'
+        : '';
+    const months = Policy.emergencyMonths;
     return [
-      Figure(label: '매달 투자할 돈', value: '월 ${formatMan(monthly)}', note: '무리 없이 모을 수 있는 돈의 절반이에요'),
+      Figure(label: '매달 투자할 돈', value: '월 ${formatMan(monthly)}', note: note),
       if (metrics['reserve'].value != null)
-        Figure(label: '예금으로 남길 돈', value: metrics['reserve'].text, note: '생활비 ${Policy.emergencyMonths}개월치예요'),
+        Figure(label: '예금으로 남길 돈', value: metrics['reserve'].text, note: '$months개월치 지출이에요.\n최소 $months개월치의 예금은 유지하시는걸 추천해요.'),
     ];
   }
   final figs = [Figure(label: '매달 모을 돈', value: '월 ${formatMan(monthly)}')];
@@ -600,8 +670,8 @@ List<Figure> proposalFigures(ProposalBasis basis, Metrics metrics) {
     final over = short != null && short > 0;
     figs.add(Figure(
       label: '기간이 끝나면',
-      value: '약 ${formatMan(exp)}',
-      note: over ? '목표보다 ${formatMan(short)} 적어요 (이자 제외)' : '이자는 빼고 계산했어요',
+      value: '약 ${formatMan(roundMan(exp))}',
+      note: over ? '목표보다 ${formatMan(roundMan(short))} 적어요' : '',
       tone: over ? 'warning' : '',
     ));
   }

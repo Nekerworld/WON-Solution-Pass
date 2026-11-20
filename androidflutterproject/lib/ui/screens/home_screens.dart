@@ -2,11 +2,13 @@
 /// 실제 우리WON뱅킹 화면 배치를 따르되, 해결패스 기능이 없는 버튼은 눌러도 아무 일이 없다.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
+import '../../app/asset_flow.dart' show nextCookie, pickCookie;
 import '../../app/overlays.dart';
 import '../../app/router.dart';
 import '../../domain/formatters.dart';
@@ -36,9 +38,34 @@ const Map<String, String> _joinResume = {
   'APPLYING': '가입 요청 중이에요',
   'VERIFYING': '가입 결과를 확인하고 있어요',
   'RESULT_UNCERTAIN': '가입 결과 확인이 필요해요 · 다시 신청하지 마세요',
-  'COMPLETED': '가입이 완료됐어요',
+  'COMPLETED': '개설 신청이 접수됐어요',
   'FAILED': '가입이 처리되지 않았어요',
   'ESCALATED': '상담 연결이 필요해요',
+};
+
+/// 해외주식 계좌 개설은 접수 → 은행 승인 대기 → 개설 완료로 말한다
+const Map<String, String> _brokerResume = {
+  'APPLYING': '신청을 접수하고 있어요',
+  'VERIFYING': '은행 승인을 기다리고 있어요',
+  'COMPLETED': '계좌 개설이 완료됐어요',
+};
+
+String _joinResumeText(String state, String productId) {
+  final p = getProduct(productId);
+  if (p != null && p.isBrokerage && _brokerResume[state] != null) return _brokerResume[state]!;
+  return _joinResume[state] ?? state;
+}
+
+const Map<String, String> _lumpResume = {
+  'INTRO': '첫 질문을 기다리고 있어요',
+  'ANALYZING': '소비를 분석하고 있어요',
+  'GOAL': '목표 금액을 기다리고 있어요',
+  'DEBT_CHECK': '상황에 맞는 질문을 기다리고 있어요',
+  'SPEND_PLAN': '줄이기 계획을 확인하고 있어요',
+  'PROFILING': '투자 경험을 기다리고 있어요',
+  'LOSS': '손실 감내를 기다리고 있어요',
+  'RECOMMEND': '상품을 고르는 중이에요',
+  'NO_ACCOUNT': '해외계좌 개설을 확인하고 있어요',
 };
 
 const Map<String, String> _directResume = {
@@ -49,7 +76,7 @@ const Map<String, String> _directResume = {
   'D_APPROVE': '가입 신청 전이에요',
   'D_VERIFYING': '가입 결과 확인 중',
   'D_UNCERTAIN': '가입 결과 확인이 필요해요',
-  'D_DONE': '가입이 완료됐어요',
+  'D_DONE': '가입 신청이 접수됐어요',
   'D_FAILED': '가입이 처리되지 않았어요',
 };
 
@@ -82,7 +109,7 @@ List<_ResumeCard> _resumeCards(AppController app) {
     out.add(_ResumeCard(
       'AI 가입 지원',
       getProduct(s.join!.productId)?.name ?? '',
-      _joinResume[js] ?? js,
+      _joinResumeText(js, s.join!.productId),
       const ['RESULT_UNCERTAIN', 'INVESTIGATING', 'CHECK_FAILED', 'ESCALATED', 'FAILED'].contains(js),
       app.join.open,
     ));
@@ -90,6 +117,10 @@ List<_ResumeCard> _resumeCards(AppController app) {
   final ds = app.directFsm.state;
   if (ds != 'IDLE' && s.direct != null) {
     out.add(_ResumeCard('직접 가입', getProduct(s.direct!.productId)?.name ?? '', _directResume[ds] ?? ds, false, app.direct.open));
+  }
+  final ls = app.lumpsumFsm.state;
+  if (!const ['IDLE', 'CLOSED', 'TO_JOIN'].contains(ls) && s.lumpsum != null) {
+    out.add(_ResumeCard('AI 자산관리', '자산관리 상담', _lumpResume[ls] ?? '상담을 이어가는 중이에요', false, app.lumpsum.open));
   }
   final as = app.assetFsm.state;
   if (!const ['IDLE', 'CLOSED', 'TO_JOIN'].contains(as) && s.asset != null) {
@@ -116,16 +147,13 @@ class HomeScreen extends StatelessWidget {
     final data = entry.data is HomeData ? entry.data as HomeData : null;
     final r = data?.summary;
     final s = app.session;
-    final hide = s.ui.hideBalance;
     final side = wideInsetOf(context);
     final cards = _resumeCards(app);
 
-    Widget bal(String amount, String unit) => hide
-        ? Text('잔액숨김', style: ts(17, color: AppColors.text3))
-        : Text.rich(TextSpan(children: [
-            TextSpan(text: amount, style: ts(21, weight: FontWeight.w700, letterSpacing: -0.02)),
-            TextSpan(text: unit, style: ts(15, color: AppColors.text2)),
-          ]));
+    Widget bal(String amount, String unit) => Text.rich(TextSpan(children: [
+          TextSpan(text: amount, style: ts(21, weight: FontWeight.w700, letterSpacing: -0.02)),
+          TextSpan(text: unit, style: ts(15, color: AppColors.text2)),
+        ]));
 
     final accts = <Widget>[];
     if (r == null || !r.ok) {
@@ -133,19 +161,21 @@ class HomeScreen extends StatelessWidget {
         child: NoticeBox(body: '계좌 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.', tone: UiTone.warning),
       ));
     } else if (!r.data!.hasDepositAccount) {
+      final who = r.data!.customerName.isNotEmpty ? r.data!.customerName : '고객';
+      final linked = app.store.state.finance.linked.join('·');
       accts.add(_AcctBox(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _AcctHead(name: '우리은행 계좌가 아직 없어요', sub: '처음 거래하시는 고객님'),
+            _AcctHead(name: '$who님, 우리은행은 처음이시네요', sub: '$linked는 연결되어 있어요'),
             const SizedBox(height: 12),
-            Text('상품에 가입하려면 입출금 계좌가 필요해요. 가입 지원에서 함께 만들 수 있어요.', style: ts(13.5, color: AppColors.text2, height: 1.5)),
+            Text('가입은 AI가 필요한 절차만 안내해요. 입출금 계좌도 그 안에서 함께 만들 수 있어요.', style: ts(13.5, color: AppColors.text2, height: 1.5)),
           ],
         ),
       ));
     } else {
       final d = r.data!;
-      accts.add(_AccountCard(name: d.account!.name, sub: '우리 ${d.account!.number}', copy: true, balance: bal('0', ' 원'), transfer: true));
+      accts.add(_AccountCard(name: d.account!.name, sub: '우리 ${d.account!.number}', copy: true, balance: bal(groupDigits(d.account!.balance), ' 원'), transfer: true));
       if (d.fxAccount != null) {
         accts.add(_AccountCard(name: d.fxAccount!.name, sub: '우리 ${d.fxAccount!.number}', copy: true, tag: '외화', balance: bal('0.00', ' USD'), transfer: true));
       }
@@ -155,7 +185,7 @@ class HomeScreen extends StatelessWidget {
         final t = sv.terms;
         final sub = t?.monthly != null
             ? '매월 ${formatMan(t!.monthly)}${t.months != null ? ' · ${t.months}개월' : ''}'
-            : (t?.market != null ? '${t!.market} 주식 거래' : '가입 완료');
+            : (t?.market != null ? '${t!.market} 주식 거래 · 개설 완료' : '가입 완료');
         accts.add(_AccountCard(name: p.name, sub: sub, tag: p.type, balance: bal('0', p.isBrokerage ? ' 원 평가금액' : ' 원')));
       }
     }
@@ -166,19 +196,22 @@ class HomeScreen extends StatelessWidget {
         bottom: false,
         child: Column(
           children: [
-            _HomeTop(onAi: app.asset.startAction, onMenu: () => app.goMenu(), onDemo: onOpenDemo),
+            _HomeTop(onAi: app.startConsult, onMenu: () => app.goMenu(), onDemo: onOpenDemo),
             Expanded(
-              child: CustomPaint(
-                painter: const _HomeBandPainter(),
-                child: ListView(
-                  padding: EdgeInsets.fromLTRB(16 + side, 2, 16 + side, 24),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: const _HomeBandPainter(),
+                      child: ListView(
+                  padding: EdgeInsets.fromLTRB(16 + side, 2, 16 + side, 84),
                   children: [
-                    if (!s.ui.disclaimerClosed) ...[
-                      const SizedBox(height: 6),
-                      _Disclaimer(onClose: app.closeDisclaimer),
-                    ],
                     const SizedBox(height: 6),
-                    _HomeHero(hideBalance: hide, onToggle: app.toggleBalance),
+                    const _HomeHero(),
+                    if (s.openedNotice != null) ...[
+                      const SizedBox(height: 10),
+                      _OpenedBanner(onClose: app.dismissOpenedNotice),
+                    ],
                     const SizedBox(height: 12),
                     for (final a in accts) Padding(padding: const EdgeInsets.only(bottom: 10), child: a),
                     if (cards.isNotEmpty) ...[
@@ -189,14 +222,6 @@ class HomeScreen extends StatelessWidget {
                       for (final c in cards) Padding(padding: const EdgeInsets.only(bottom: 8), child: _ResumeTile(c)),
                       const SizedBox(height: 4),
                     ],
-                    const _OutlineButton(label: '전체계좌보기'),
-                    const SizedBox(height: 14),
-                    _AdBanner(
-                      title: '해외주식, 처음이라도 괜찮아요\n계좌 개설부터 AI가 함께해요',
-                      sub: 'WON 해외주식 계좌 · 시연용 배너',
-                      pager: '1 / 4',
-                      onTap: () => app.openProduct('OVERSEAS_STOCK'),
-                    ),
                     const _H3('추천서비스'),
                     SizedBox(
                       height: 222,
@@ -208,15 +233,15 @@ class HomeScreen extends StatelessWidget {
                           padding: EdgeInsets.symmetric(horizontal: 16 + side),
                           children: [
                             _SvcPanel(color: const Color(0xFFFFF1F4), items: [
-                              _SvcItem(AppIcons.target, const Color(0xFF2488F3), 'AI 자산관리 상담', '모을 돈과 투자할 돈을 함께 정해요', app.asset.startAction),
-                              _SvcItem(AppIcons.product, const Color(0xFF7B5CFF), '상품 가입', 'AI와 함께 또는 직접 가입해요', app.goProducts),
-                              _SvcItem(AppIcons.wallet, const Color(0xFF20C4F4), '우리WON지갑', '모바일 신분증 등 생활 서비스', null),
+                              _SvcItem(AppIcons.target, const Color(0xFF2488F3), 'AI 자산관리 상담', app.startConsult, lead: true),
+                              _SvcItem(AppIcons.product, const Color(0xFF7B5CFF), '상품 가입', app.goProducts),
+                              _SvcItem(AppIcons.wallet, const Color(0xFF20C4F4), '우리WON지갑', null),
                             ]),
                             const SizedBox(width: 10),
                             _SvcPanel(color: const Color(0xFFEEF5FF), items: [
-                              _SvcItem(AppIcons.phone, const Color(0xFF2488F3), '우리WON모바일', '은행이 만든 알뜰폰 통신', null),
-                              _SvcItem(AppIcons.globe, const Color(0xFF11A3A3), '환전주머니', '여행 환전을 손쉽게 준비해요', null),
-                              _SvcItem(AppIcons.coin, const Color(0xFF20C4F4), 'ATM 출금', '카드 없이 휴대폰으로 출금', null),
+                              _SvcItem(AppIcons.phone, const Color(0xFF2488F3), '우리WON모바일', null),
+                              _SvcItem(AppIcons.globe, const Color(0xFF11A3A3), '환전주머니', null),
+                              _SvcItem(AppIcons.coin, const Color(0xFF20C4F4), 'ATM 출금', null),
                             ]),
                           ],
                         ),
@@ -261,21 +286,20 @@ class HomeScreen extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 14),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      decoration: BoxDecoration(color: AppColors.bg, borderRadius: BorderRadius.circular(12)),
-                      child: Row(
-                        children: [
-                          Text('공지', style: ts(13, weight: FontWeight.w700, color: AppColors.blue)),
-                          const SizedBox(width: 10),
-                          Expanded(child: Text('이 화면은 경진대회 시연용 모의 화면이에요', maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(13, color: AppColors.text2))),
-                          SvgIcon(AppIcons.chevron, size: 16, color: AppColors.muted),
-                        ],
+                  ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  Positioned(
+                    right: 12,
+                    left: 12,
+                    bottom: 14,
+                    child: Align(
+                      alignment: Alignment.bottomRight,
+                      child: _FortuneCookie(onAsk: app.askCookie),
+                    ),
+                  ),
+                ],
               ),
             ),
             const AppBottomNav(active: 'home'),
@@ -318,24 +342,12 @@ class _HomeTop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget mode(String label, bool on) => Container(
-          height: 28,
-          padding: EdgeInsets.symmetric(horizontal: on ? 9 : 7),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(color: on ? Colors.white : Colors.transparent, borderRadius: BorderRadius.circular(AppRadius.pill)),
-          child: Text(label, style: ts(14, color: on ? AppColors.text : Colors.white)),
-        );
     final side = wideInsetOf(context);
     return Container(
       color: AppColors.bg,
       padding: EdgeInsets.fromLTRB(20 + side, 6, 8 + side, 6),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(2),
-            decoration: BoxDecoration(color: AppColors.modeToggleBg, borderRadius: BorderRadius.circular(AppRadius.pill)),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [mode('일반홈', true), mode('쉬운', false)]),
-          ),
           const Spacer(),
           AppIconButton(icon: AppIcons.wallet, label: '지갑', size: 40, color: AppColors.iconDark, onTap: () {}),
           AppIconButton(icon: AppIcons.ai, label: 'AI 자산관리 상담', size: 40, iconSize: 28, color: AppColors.iconDark, onTap: onAi),
@@ -348,101 +360,187 @@ class _HomeTop extends StatelessWidget {
   }
 }
 
-class _Disclaimer extends StatelessWidget {
-  const _Disclaimer({required this.onClose});
+/// 해외주식 계좌 개설(은행 승인)이 끝났을 때 홈에 한 번 띄운다
+class _OpenedBanner extends StatelessWidget {
+  const _OpenedBanner({required this.onClose});
 
   final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 4, 12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppRadius.card)),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(color: AppColors.noticeIconBg, borderRadius: BorderRadius.circular(12)),
-            child: SvgIcon(AppIcons.bellFill, size: 22, color: AppColors.noticeIcon),
-          ),
-          const SizedBox(width: 12),
-          Expanded(child: Text('이 앱은 경진대회 시연용 목업이에요.\n상품·조건·금액은 모두 가상의 값이에요.', style: ts(13.5, height: 1.5))),
-          AppIconButton(icon: AppIcons.x, label: '안내 닫기', size: 36, iconSize: 15, color: AppColors.muted, onTap: onClose),
-        ],
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+        decoration: BoxDecoration(color: const Color(0xFFE8F7EE), borderRadius: BorderRadius.circular(16)),
+        child: Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(color: Color(0xFF1FA463), shape: BoxShape.circle),
+              child: SvgIcon(AppIcons.check, size: 16, color: Colors.white),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('해외주식 계좌 개설이 완료됐어요', style: ts(14.5, weight: FontWeight.w700, color: const Color(0xFF136A3C))),
+                  const SizedBox(height: 2),
+                  Text('은행 승인이 끝났어요. 아래에서 새 계좌를 확인해 보세요.', style: ts(12.5, color: const Color(0xFF3D7F5B))),
+                ],
+              ),
+            ),
+            AppIconButton(icon: AppIcons.x, label: '닫기', size: 28, iconSize: 14, color: const Color(0xFF3D7F5B), onTap: onClose),
+          ],
+        ),
       ),
     );
   }
 }
 
 class _HomeHero extends StatelessWidget {
-  const _HomeHero({required this.hideBalance, required this.onToggle});
-
-  final bool hideBalance;
-  final VoidCallback onToggle;
+  const _HomeHero();
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        LayoutBuilder(
-          builder: (context, c) {
-            final w = math.min(c.maxWidth, 450.0);
-            return SvgIcon(AppIcons.homeArt, width: w, height: w / 3, size: w);
-          },
-        ),
-        Transform.translate(
-          offset: const Offset(0, -4),
-          child: Row(
-            children: [
-              _HeroPill(children: [
-                SvgIcon(AppIcons.gear, size: 16, color: AppColors.iconDark),
-                const SizedBox(width: 4),
-                Text('홈계좌설정', style: ts(13.5, color: AppColors.iconDark)),
-              ]),
-              const Spacer(),
-              Semantics(
-                toggled: hideBalance,
-                label: '잔액숨김',
-                child: GestureDetector(
-                  onTap: onToggle,
-                  behavior: HitTestBehavior.opaque,
-                  child: _HeroPill(children: [
-                    Text('잔액숨김', style: ts(13.5, color: AppColors.iconDark)),
-                    const SizedBox(width: 6),
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 30,
-                      height: 18,
-                      padding: const EdgeInsets.all(2.5),
-                      alignment: hideBalance ? Alignment.centerRight : Alignment.centerLeft,
-                      decoration: BoxDecoration(color: hideBalance ? AppColors.blue : AppColors.toggleOff, borderRadius: BorderRadius.circular(AppRadius.pill)),
-                      child: Container(width: 13, height: 13, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
-                    ),
-                  ]),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, c) {
+        final w = math.min(c.maxWidth, 450.0);
+        return SvgIcon(AppIcons.homeArt, width: w, height: w / 3, size: w);
+      },
     );
   }
 }
 
-class _HeroPill extends StatelessWidget {
-  const _HeroPill({required this.children});
+/// 홈 오른쪽 아래 포춘쿠키: 누르면 추천 질문이 펼쳐지고, 물어보기로 새 상담을 연다
+class _FortuneCookie extends StatefulWidget {
+  const _FortuneCookie({required this.onAsk});
 
-  final List<Widget> children;
+  final Future<void> Function(String line) onAsk;
+
+  @override
+  State<_FortuneCookie> createState() => _FortuneCookieState();
+}
+
+class _FortuneCookieState extends State<_FortuneCookie> {
+  String? _line;
+  bool _open = false;
+  bool _text = false;
+  bool _ready = false;
+  Timer? _textTimer;
+  Timer? _readyTimer;
+
+  @override
+  void dispose() {
+    _textTimer?.cancel();
+    _readyTimer?.cancel();
+    super.dispose();
+  }
+
+  void _toggle() {
+    _textTimer?.cancel();
+    _readyTimer?.cancel();
+    if (_open) {
+      setState(() => _open = _text = _ready = false);
+      return;
+    }
+    final state = AppScope.controllerOf(context).store.state;
+    setState(() {
+      _line = nextCookie(state, _line ?? '');
+      _open = true;
+    });
+    _textTimer = Timer(const Duration(milliseconds: 320), () {
+      if (mounted && _open) setState(() => _text = true);
+    });
+    _readyTimer = Timer(const Duration(milliseconds: 700), () {
+      if (mounted && _open) setState(() => _ready = true);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 32,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppRadius.pill)),
-      child: Row(mainAxisSize: MainAxisSize.min, children: children),
+    final line = _line ??= pickCookie(AppScope.controllerOf(context).store.state);
+    const dur = Duration(milliseconds: 420);
+    return LayoutBuilder(
+      builder: (context, c) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          AnimatedSize(
+            duration: const Duration(milliseconds: 280),
+            curve: appEase,
+            child: _ready
+                ? Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Material(
+                      color: const Color(0xFF1F6FEB),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                        onTap: () => widget.onAsk(line),
+                        child: Container(
+                          height: 36,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          alignment: Alignment.center,
+                          child: Text('물어보기', style: ts(13, weight: FontWeight.w700, color: Colors.white)),
+                        ),
+                      ),
+                    ),
+                  )
+                : const SizedBox(width: 0, height: 0),
+          ),
+          Semantics(
+            button: true,
+            label: '추천 질문',
+            child: GestureDetector(
+              onTap: _toggle,
+              child: AnimatedSize(
+                duration: dur,
+                curve: appEase,
+                alignment: Alignment.bottomRight,
+                child: AnimatedContainer(
+                  duration: dur,
+                  curve: appEase,
+                  width: _open ? c.maxWidth : 40,
+                  constraints: const BoxConstraints(minHeight: 40),
+                  padding: _open ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10) : EdgeInsets.zero,
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(_open ? 16 : 20), boxShadow: shadowCard),
+                  child: _open
+                      ? AnimatedOpacity(
+                          opacity: _text ? 1 : 0,
+                          duration: const Duration(milliseconds: 360),
+                          curve: appEase,
+                          child: Text(line, textAlign: TextAlign.center, style: ts(13, weight: FontWeight.w700, height: 1.45)),
+                        )
+                      : Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            const SizedBox(width: 40, height: 40),
+                            Positioned(right: 7, bottom: 7, child: SvgIcon(AppIcons.cookie, size: 26)),
+                            Positioned(
+                              right: -1,
+                              top: -1,
+                              child: Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE23B3B),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 2),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -588,26 +686,6 @@ class _ResumeTile extends StatelessWidget {
   }
 }
 
-class _OutlineButton extends StatelessWidget {
-  const _OutlineButton({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 52,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppRadius.button),
-        border: Border.all(color: AppColors.outline),
-      ),
-      child: Text(label, style: ts(16)),
-    );
-  }
-}
-
 class _AdBanner extends StatelessWidget {
   const _AdBanner({required this.title, required this.sub, required this.pager, required this.onTap});
 
@@ -684,12 +762,12 @@ class _H3 extends StatelessWidget {
 }
 
 class _SvcItem {
-  const _SvcItem(this.icon, this.color, this.title, this.desc, this.onTap);
+  const _SvcItem(this.icon, this.color, this.title, this.onTap, {this.lead = false});
   final SvgArt icon;
   final Color color;
   final String title;
-  final String desc;
   final VoidCallback? onTap;
+  final bool lead;
 }
 
 class _SvcPanel extends StatelessWidget {
@@ -707,30 +785,32 @@ class _SvcPanel extends StatelessWidget {
       child: Column(
         children: [
           for (final it in items)
-            InkWell(
-              onTap: it.onTap ?? () {},
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                      child: SvgIcon(it.icon, size: 22, color: it.color),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              child: Material(
+                color: it.lead ? Colors.white.withValues(alpha: 0.8) : Colors.transparent,
+                borderRadius: BorderRadius.circular(14),
+                shadowColor: const Color(0x242488F3),
+                elevation: it.lead ? 1 : 0,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: it.onTap ?? () {},
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 38,
+                          height: 38,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(color: it.lead ? const Color(0xFFE8F3FF) : Colors.white, borderRadius: BorderRadius.circular(12)),
+                          child: SvgIcon(it.icon, size: 22, color: it.color),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(child: Text(it.title, style: ts(14, weight: FontWeight.w700))),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(it.title, style: ts(14.5, weight: FontWeight.w700)),
-                          Text(it.desc, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(12.5, color: AppColors.text2)),
-                        ],
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -776,7 +856,7 @@ class AppBottomNav extends StatelessWidget {
         child: Row(
           children: [
             item(AppIcons.bag, '상품', 'products', active == 'products' ? null : app.goProducts),
-            item(AppIcons.pie, '자산·소비', 'asset', app.asset.startAction),
+            item(AppIcons.pie, '자산·소비', 'asset', active == 'asset' ? null : () => app.navigate(ScreenId.spend)),
             item(AppIcons.homeFill, '홈', 'home', active == 'home' ? null : app.goHome),
             item(AppIcons.stockBox, '주식', 'stock', null),
             item(AppIcons.gift, '혜택', 'gift', null),
@@ -861,7 +941,7 @@ class ProductsScreen extends StatelessWidget {
                 children: [
                   Text('상품몰', style: ts(20, weight: FontWeight.w700, letterSpacing: -0.03)),
                   const Spacer(),
-                  AppIconButton(icon: AppIcons.ai, label: 'AI 자산관리 상담', size: 40, iconSize: 28, color: AppColors.iconDark, onTap: app.asset.startAction),
+                  AppIconButton(icon: AppIcons.ai, label: 'AI 자산관리 상담', size: 40, iconSize: 28, color: AppColors.iconDark, onTap: app.startConsult),
                   AppIconButton(icon: AppIcons.cart, label: '장바구니', size: 40, color: AppColors.iconDark, onTap: () {}),
                   AppIconButton(icon: AppIcons.menu, label: '전체 메뉴', size: 40, color: AppColors.iconDark, onTap: () => app.goMenu()),
                 ],
@@ -873,7 +953,7 @@ class ProductsScreen extends StatelessWidget {
                 children: [
                   _AdBanner(
                     title: '처음 거래 고객도 해외주식까지\n가입 순서는 AI가 정리해 드려요',
-                    sub: 'WON 해외주식 계좌 · 시연용 배너',
+                    sub: 'WON 해외주식 계좌',
                     pager: '2 / 5',
                     onTap: () => app.openProduct('OVERSEAS_STOCK'),
                   ),
@@ -1207,7 +1287,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
             ],
           ),
         ),
-        const Fineprint('목록의 상품명과 금리는 시연용 가상 값이에요.'),
       ],
     );
   }
@@ -1246,7 +1325,6 @@ class _ProductScreenState extends State<ProductScreen> {
     final fromAsset = widget.entry.params['from'] == 'asset';
     final ctx = fromAsset ? s.asset?.handoffTerms : null;
     final joinActive = app.joinFsm.state != 'IDLE' && s.join?.productId == p.id;
-    final directActive = app.directFsm.state != 'IDLE' && s.direct?.productId == p.id;
     final isSavings = p.maxMonthly > 0;
     final rate = _rateNum(p);
     final strong = ts(23, weight: FontWeight.w700, color: AppColors.blue, letterSpacing: -0.03);
@@ -1362,8 +1440,8 @@ class _ProductScreenState extends State<ProductScreen> {
           const SizedBox(width: 8),
           Expanded(
             child: AppButton(
-              joinActive || directActive ? '이어서 가입' : '상품 가입',
-              onPressed: () => app.openJoinMethod(p.id, from: ctx != null ? 'asset' : null),
+              joinActive ? '이어서 가입' : (ctx != null ? (p.isBrokerage ? '이 계좌 개설 도와줘' : '이 상품 가입 도와줘') : 'AI와 함께 가입'),
+              onPressed: () => app.join.startAction(p.id, from: ctx != null ? 'asset' : null),
             ),
           ),
         ],
@@ -1373,37 +1451,6 @@ class _ProductScreenState extends State<ProductScreen> {
         Text.rich(title, style: titleStyle),
         const SizedBox(height: 12),
         Wrap(spacing: 6, runSpacing: 6, children: chips),
-        if (ctx != null) ...[
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: const Color(0xFFEEF5FF), borderRadius: BorderRadius.circular(12)),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SvgIcon(AppIcons.target, size: 20, color: AppColors.blue),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text.rich(
-                    TextSpan(children: [
-                      bold('자산관리 상담에서 정한 방향'),
-                      TextSpan(
-                        text: '\n${ctx.purpose}'
-                            '${ctx.monthly != null ? ' · 월 ${formatMan(ctx.monthly)}${p.isBrokerage ? ' 투자' : ''}' : ''}'
-                            '${ctx.months != null ? ' · ${ctx.months}개월' : ''}',
-                      ),
-                      TextSpan(
-                        text: '\n상품을 고른 것은 가입이 아니에요. 아래 상품 가입에서 가입 방법을 고르면 가입 지원이 시작돼요.',
-                        style: ts(12, color: AppColors.text3),
-                      ),
-                    ]),
-                    style: ts(13.5, height: 1.55),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
         const SizedBox(height: 14),
         Container(
           width: double.infinity,
@@ -1424,9 +1471,13 @@ class _ProductScreenState extends State<ProductScreen> {
               padding: const EdgeInsets.only(bottom: 4),
               child: Text('· ${conditions[id]?.label ?? id}', style: ts(13.5, color: AppColors.text2, height: 1.5)),
             ),
-          const SizedBox(height: 4),
-          Text('＊ 부족한 조건은 AI와 함께 가입할 때 해결 순서를 안내해 드려요.', style: ts(12, color: AppColors.text3, height: 1.5)),
         ]),
+        Container(
+          height: 44,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: AppColors.bg, borderRadius: BorderRadius.circular(12)),
+          child: Text('더보기', style: ts(13.5, color: AppColors.text2)),
+        ),
         const Divider(height: 36, color: AppColors.line),
         for (final x in ['상품설명', p.isBrokerage ? '수수료안내' : '금리안내', '약관 및 상품설명서'])
           Padding(
@@ -1434,73 +1485,33 @@ class _ProductScreenState extends State<ProductScreen> {
             child: Row(children: [Expanded(child: Text(x, style: ts(15))), SvgIcon(AppIcons.chevron, size: 16, color: AppColors.muted)]),
           ),
         const Divider(height: 36, color: AppColors.line),
-        Text('준법감시인 심의필', style: ts(12, weight: FontWeight.w700, color: AppColors.text3)),
-        const SizedBox(height: 2),
-        Text('경진대회 시연용 모의 화면으로 심의 번호가 없어요.', style: ts(12, color: AppColors.text3)),
-      ],
-    );
-  }
-}
-
-/// 상품 가입 방법 선택 시트 내용
-class JoinMethodSheetView extends StatelessWidget {
-  const JoinMethodSheetView({super.key, required this.sheet});
-
-  final JoinMethodSheet sheet;
-
-  @override
-  Widget build(BuildContext context) {
-    final app = AppScope.controllerOf(context);
-    final p = getProduct(sheet.productId)!;
-    Widget choice({required bool ai, required String title, required String desc}) => Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Material(
-            color: ai ? const Color(0xFFEEF5FF) : AppColors.bg,
-            borderRadius: BorderRadius.circular(AppRadius.card),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(AppRadius.card),
-              onTap: () => app.chooseJoinMethod(ai, p.id, sheet.from),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        const _H3('공유하기'),
+        Row(
+          children: [
+            for (final x in [
+              ('카카오톡', const Color(0xFFFEE500), const Color(0xFF3C1E1E), AppIcons.chat),
+              ('문자', const Color(0xFFE8F1FE), const Color(0xFF2488F3), AppIcons.msg),
+              ('앱 선택', const Color(0xFFEEF0F3), const Color(0xFF5A636C), AppIcons.grid),
+            ])
+              Padding(
+                padding: const EdgeInsets.only(right: 20),
+                child: Column(
                   children: [
                     Container(
-                      width: 40,
-                      height: 40,
+                      width: 48,
+                      height: 48,
                       alignment: Alignment.center,
-                      decoration: BoxDecoration(color: ai ? AppColors.blue : Colors.white, borderRadius: BorderRadius.circular(12)),
-                      child: SvgIcon(ai ? AppIcons.spark : AppIcons.doc, size: 22, color: ai ? Colors.white : AppColors.text2),
+                      decoration: BoxDecoration(color: x.$2, shape: BoxShape.circle),
+                      child: SvgIcon(x.$4, size: 22, color: x.$3),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(title, style: ts(15.5, weight: FontWeight.w700)),
-                          const SizedBox(height: 3),
-                          Text(desc, style: ts(13, color: AppColors.text2, height: 1.5)),
-                        ],
-                      ),
-                    ),
+                    const SizedBox(height: 6),
+                    Text(x.$1, style: ts(12, color: AppColors.text2)),
                   ],
                 ),
               ),
-            ),
-          ),
-        );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text('${p.name}\n가입 방법을 골라 주세요', style: ts(19, weight: FontWeight.w700, height: 1.45, letterSpacing: -0.03)),
-        const SizedBox(height: 16),
-        choice(
-          ai: true,
-          title: sheet.joinActive ? 'AI 가입 지원 이어서 하기' : 'AI와 함께 가입',
-          desc: '부족한 조건과 해결 순서를 확인하고, 필요한 업무 화면을 바로 열어 드려요',
+          ],
         ),
-        choice(ai: false, title: sheet.directActive ? '직접 가입 이어서 하기' : '직접 가입', desc: '기존 가입 화면을 단계별로 직접 진행해요'),
+        const SizedBox(height: 12),
       ],
     );
   }

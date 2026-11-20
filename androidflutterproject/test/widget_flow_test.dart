@@ -1,6 +1,7 @@
-// 실제 화면을 눌러 가며 통합 시나리오(해외주식 계좌 AI 가입 지원)와 자산관리 상담, 시연 제어를 확인한다.
+// 실제 화면을 눌러 가며 통합 시나리오(해외주식 계좌 AI 가입 지원)와 목돈·자산관리 상담, 시연 제어를 확인한다.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:won_solution_pass/app/router.dart';
 import 'package:won_solution_pass/data/key_value_storage.dart';
 import 'package:won_solution_pass/domain/asset_advisor.dart' as aa;
 import 'package:won_solution_pass/domain/scenario.dart';
@@ -29,24 +30,17 @@ void main() {
 
   Future<void> tap(WidgetTester tester, String text) => tapFinder(tester, find.text(text), '"$text" 버튼이 보여야 함');
 
-  testWidgets('해외주식 계좌: 상품 → AI 가입 지원 → 숨은 선행조건 7단계 → 승인 → 개설', (tester) async {
+  testWidgets('해외주식 계좌: 상품 → AI 가입 지원 → 외환·외화계좌·투자성향 → 승인 → 개설', (tester) async {
     await boot(tester);
-    see('시연용 목업');
-
     final app = services.controller;
     app.openProduct(DemoScenario.productId);
     await settle(tester);
-    await tap(tester, '상품 가입');
     await tap(tester, 'AI와 함께 가입');
-    await tap(tester, '동의하고 시작');
-
-    // 실물 신분증 없음, 모바일 신분증 있음
-    await tap(tester, '아니요, 없어요');
-    await tap(tester, '네, 있어요');
-    expect(app.joinFsm.state, 'OPTIONS_READY');
+    await tap(tester, '가입 조건 확인');
+    expect(app.session.join!.questionsAsked, 0, reason: '이미 있는 계좌 고객에게는 질문하지 않음');
 
     final order = <String>[];
-    for (var i = 0; i < 10 && (app.joinFsm.state == 'OPTIONS_READY' || app.joinFsm.state == 'REMAINING'); i++) {
+    for (var i = 0; i < 6 && (app.joinFsm.state == 'OPTIONS_READY' || app.joinFsm.state == 'REMAINING'); i++) {
       final id = app.session.join!.route!.steps.first.actionId;
       final task = getTask(id)!;
       order.add(id);
@@ -58,7 +52,7 @@ void main() {
       await tap(tester, '진행하기');
       await tap(tester, '닫고 은행 기록 확인');
     }
-    expect(order, ['MOBILE_ID_VERIFY', 'OPEN_ACCOUNT_OTHERBANK', 'ISSUE_CERT', 'KYC_UPDATE', 'FX_REGISTER', 'OPEN_FX_ACCOUNT', 'INVESTOR_PROFILE']);
+    expect(order, ['FX_REGISTER', 'OPEN_FX_ACCOUNT', 'INVESTOR_PROFILE']);
     expect(app.joinFsm.state, 'READY_TO_APPLY');
     expect(services.store.state.applications, isEmpty, reason: '승인 전에는 가입 요청이 없어야 함');
 
@@ -68,15 +62,15 @@ void main() {
     await tap(tester, '승인하고 가입 요청');
     expect(app.joinFsm.state, 'COMPLETED');
     expect(services.store.state.applications.values.single.status, 'SUCCESS');
+    see('해외주식 계좌 개설이 완료됐어요');
   });
 
-  testWidgets('직접 가입: 단계 진행 → 부족 조건 안내 → 메뉴로 이동', (tester) async {
+  testWidgets('직접 가입(진입점 없음): 단계 진행 → 부족 조건 안내 → 메뉴로 이동', (tester) async {
     await boot(tester);
     final app = services.controller;
-    app.openProduct('SAVINGS_GOAL');
+    services.store.update((d) => d.facts['identityVerified'] = false, '[테스트] 실명확인 없음');
+    await app.direct.startAction('SAVINGS_GOAL');
     await settle(tester);
-    await tap(tester, '상품 가입');
-    await tap(tester, '직접 가입');
     await tap(tester, '가입 시작');
     expect(app.directFsm.state, 'D_STEP');
     app.direct.toggleAgree();
@@ -96,7 +90,7 @@ void main() {
     await app.asset.startAction();
     await settle(tester);
     expect(app.assetFsm.state, 'CONSENT');
-    await tap(tester, '동의하고 시작');
+    await tap(tester, '상담 시작');
     expect(app.assetFsm.state, 'GOAL');
 
     await app.asset.setGoal('해외주식 투자를 처음 시작해 보고 싶어요');
@@ -109,15 +103,30 @@ void main() {
     see('원금 손실');
   });
 
-  testWidgets('시연 제어: 진행 과정·상태머신·자가 테스트 섹션 표시', (tester) async {
+  testWidgets('홈 AI 상담과 포춘쿠키는 목돈 상담 채팅으로 이어짐', (tester) async {
+    await boot(tester);
+    final app = services.controller;
+    await app.startConsult();
+    await settle(tester);
+    expect(app.router.current?.id, ScreenId.lumpsum);
+    see('어떤 목표로 상담받고 싶으세요');
+
+    await app.goHome();
+    await settle(tester);
+    await tapFinder(tester, find.bySemanticsLabel('추천 질문'), '포춘쿠키가 보여야 함');
+    await tap(tester, '물어보기');
+    expect(app.router.current?.id, ScreenId.lumpsum);
+    expect(app.session.lumpsum!.chat.where((m) => m.role == 'user'), isNotEmpty, reason: '쿠키 문장이 전송되어야 함');
+  });
+
+  testWidgets('시연 패널: 열기 → 처음부터 → 닫기', (tester) async {
     await boot(tester);
     await tapFinder(tester, find.bySemanticsLabel('시연 제어'), '시연 제어 버튼이 보여야 함');
-    see('DEMO CONTROL');
-    see('진행 과정');
-    see('홈에서 AI 자산관리 상담으로 시작');
-    expect(find.byType(CustomPaint), findsWidgets);
-    await tap(tester, '데모 초기화');
-    expect(find.text('DEMO CONTROL'), findsNothing);
+    see('처음부터');
+    await tap(tester, '처음부터');
+    expect(services.controller.joinFsm.state, 'IDLE');
+    await tapFinder(tester, find.bySemanticsLabel('닫기'), '닫기 버튼이 보여야 함');
+    expect(find.text('처음부터'), findsNothing);
   });
 }
 

@@ -115,7 +115,7 @@ const List<TaskDef> tasks = [
     weight: 3,
     minutes: 3,
     prep: ['실물 신분증(주민등록증 또는 운전면허증)'],
-    steps: ['신분증 촬영', '신분증 진위 확인 요청', '은행 확인 결과 수신'],
+    steps: ['신분증 종류 선택', '신분증 촬영', '진위 확인 요청', '은행 확인 결과 수신'],
     desc: '신분증을 촬영해 본인임을 확인해요.',
   ),
   TaskDef(
@@ -129,7 +129,7 @@ const List<TaskDef> tasks = [
     weight: 2,
     minutes: 2,
     prep: ['모바일 운전면허 또는 모바일 주민등록증 앱'],
-    steps: ['모바일 신분증 앱 연결', '신분 정보 제출 동의', '은행 확인 결과 수신'],
+    steps: ['모바일 신분증 앱 연결', '제출 항목 확인', '신분 정보 제출 동의', '은행 확인 요청', '확인 결과 수신'],
     desc: '휴대폰에 등록된 모바일 신분증으로 본인임을 확인해요.',
   ),
   TaskDef(
@@ -143,7 +143,7 @@ const List<TaskDef> tasks = [
     weight: 3,
     minutes: 4,
     prep: ['다른 은행 본인 명의 계좌번호'],
-    steps: ['계좌 정보 입력', '다른 은행 계좌로 1원 입금 확인', '계좌 개설 결과 수신'],
+    steps: ['다른 은행 선택', '계좌번호 입력', '1원 입금', '입금자명 확인', '계좌 개설 요청', '개설 결과 수신'],
     desc: '다른 은행 본인 계좌로 1원을 보내 본인 계좌인지 확인한 뒤 계좌를 만들어요.',
   ),
   TaskDef(
@@ -157,7 +157,7 @@ const List<TaskDef> tasks = [
     weight: 2,
     minutes: 3,
     prep: ['우리 인증서'],
-    steps: ['계좌 정보 입력', '인증서 전자서명', '계좌 개설 결과 수신'],
+    steps: ['계좌 정보 입력', '인증서 전자서명', '개설 약관 확인', '계좌 개설 결과 수신'],
     desc: '우리 인증서로 본인 확인 후 계좌를 만들어요.',
   ),
   TaskDef(
@@ -171,7 +171,7 @@ const List<TaskDef> tasks = [
     weight: 2,
     minutes: 2,
     prep: ['우리은행 계좌 비밀번호'],
-    steps: ['우리은행 계좌 확인', '인증서 비밀번호 설정', '인증서 등록 결과 수신'],
+    steps: ['우리은행 계좌 확인', '인증서 비밀번호 설정', '비밀번호 재입력', '인증서 등록 결과 수신'],
     desc: '전자서명에 쓰는 우리 인증서를 이 기기에 발급해요. 우리은행 계좌가 있어야 해요.',
   ),
   TaskDef(
@@ -185,7 +185,7 @@ const List<TaskDef> tasks = [
     weight: 1,
     minutes: 1,
     prep: ['우리 인증서'],
-    steps: ['직업 정보 저장', '거래 목적 저장', '고객정보 확인 결과 수신'],
+    steps: ['직업·거래 목적 저장', '고객정보 확인 결과 수신'],
     fields: [
       TaskField('job', '직업', ['회사원', '공무원', '자영업', '프리랜서', '학생', '기타']),
       TaskField('purpose', '거래 목적', ['저축·자산 형성', '해외주식 투자', '급여 수령', '생활비 관리', '기타']),
@@ -203,7 +203,7 @@ const List<TaskDef> tasks = [
     weight: 2,
     minutes: 2,
     prep: ['우리 인증서'],
-    steps: ['외환거래 약관 확인', '인증서 전자서명', '외환거래 등록 결과 수신'],
+    steps: ['외환거래 약관 확인', '거래 한도 확인', '인증서 전자서명', '외환거래 등록 결과 수신'],
     desc: '외화를 사고팔고 외화 계좌를 쓰려면 외환거래 서비스를 먼저 신청해야 해요.',
   ),
   TaskDef(
@@ -217,7 +217,7 @@ const List<TaskDef> tasks = [
     weight: 2,
     minutes: 2,
     prep: ['우리은행 입출금 계좌'],
-    steps: ['통화 선택(USD)', '원화 계좌 연결', '외화 계좌 개설 결과 수신'],
+    steps: ['통화 선택(USD)', '연결할 원화 계좌 선택', '계좌 비밀번호 설정', '개설 약관 확인', '외화 계좌 개설 결과 수신'],
     desc: '해외주식을 사고팔 때 달러를 넣어 두는 외화 계좌를 만들어요.',
   ),
   TaskDef(
@@ -231,7 +231,7 @@ const List<TaskDef> tasks = [
     weight: 2,
     minutes: 3,
     prep: [],
-    steps: ['투자 경험 확인', '감당할 수 있는 손실 확인', '투자성향 결과 수신'],
+    steps: ['투자 경험과 손실 한도 확인', '투자성향 결과 저장'],
     fields: [
       TaskField('experience', '투자 경험', ['없어요', '1년 미만', '1~3년', '3년 이상']),
       TaskField('loss', '감당할 수 있는 손실', ['원금은 지키고 싶어요', '10% 이내', '20% 이내', '그 이상도 괜찮아요']),
@@ -367,6 +367,52 @@ const List<ProductDef> products = [
       DirectStep('sign', '전자서명', ['CERT']),
     ],
   ),
+  ProductDef(
+    id: 'DOMESTIC_STOCK',
+    name: 'WON 국내주식 계좌',
+    type: '국내주식',
+    rate: '수수료 0.015%',
+    summary: '국내 주식을 사고팔 수 있는 투자 계좌',
+    goalTags: ['국내주식'],
+    periods: [],
+    minMonthly: 0,
+    maxMonthly: 0,
+    conditions: ['ADULT', 'IDENTITY', 'ACCOUNT', 'CERT'],
+    directSteps: _simpleSteps,
+  ),
+  ProductDef(
+    id: 'GOLD',
+    name: 'WON 골드 통장',
+    type: '금',
+    rate: '수수료 1.0%',
+    summary: '금을 적립하고 보관하는 통장',
+    goalTags: ['금'],
+    periods: [],
+    minMonthly: 0,
+    maxMonthly: 0,
+    conditions: ['ADULT', 'IDENTITY', 'ACCOUNT', 'CERT'],
+    directSteps: _simpleSteps,
+  ),
+  ProductDef(
+    id: 'US_ETF',
+    name: 'WON 미국ETF 적립',
+    type: '적립',
+    rate: '수수료 0.1%',
+    summary: '미국 ETF를 매달 나누어 사는 적립',
+    goalTags: ['미국ETF'],
+    periods: [],
+    minMonthly: 0,
+    maxMonthly: 0,
+    conditions: ['ADULT', 'IDENTITY', 'ACCOUNT', 'CERT'],
+    directSteps: _simpleSteps,
+  ),
+];
+
+const List<DirectStep> _simpleSteps = [
+  DirectStep('terms', '상품 안내·약관 동의', []),
+  DirectStep('identity', '본인 확인', ['ADULT', 'IDENTITY']),
+  DirectStep('account', '연결 계좌 선택', ['ACCOUNT']),
+  DirectStep('sign', '전자서명', ['CERT']),
 ];
 
 const Map<String, String> sourceLabel = {'BANK': '조회', 'STATED': '고객 답변', 'ESTIMATED': '추정', 'UNKNOWN': '미확인'};
@@ -379,15 +425,13 @@ class DemoStage {
   final String? application;
 }
 
-/// 발표용 통합 시나리오: 처음 거래하는 고객의 해외주식 계좌 개설
+/// 발표용 통합 시나리오: 입출금 계좌는 있고 해외주식 계좌는 없는 김우리
 class DemoScenario {
-  static const String title = '처음 거래하는 고객의 해외주식 계좌 개설';
+  static const String title = '입출금 계좌는 있고 해외주식 계좌는 없는 김우리';
   static const String productId = 'OVERSEAS_STOCK';
-  static const List<(String, String)> customerAnswers = [('실물 신분증', '없음'), ('모바일 신분증', '있음')];
-  static const List<String> givens = ['우리은행 계좌·인증서 없음', '다른 은행 계좌 있음(마이데이터 연결)', '고객정보·투자성향 미등록'];
+  static const List<(String, String)> customerAnswers = [];
+  static const List<String> givens = ['입출금 계좌·실명확인·인증서·고객정보 있음', '월급·지출·예금은 이 계좌에서 확인', '해외주식 계좌 없음'];
   static const List<DemoStage> stages = [
-    DemoStage('ACCOUNT', '계좌 개설', ['identityVerified', 'hasDepositAccount']),
-    DemoStage('AUTH', '인증', ['certRegistered', 'kycDone']),
     DemoStage('FX', '외환거래', ['fxRegistered']),
     DemoStage('FX_ACCOUNT', '해외계좌', ['hasFxAccount']),
     DemoStage('STOCK', '주식계좌', ['investorProfiled'], application: 'OVERSEAS_STOCK'),

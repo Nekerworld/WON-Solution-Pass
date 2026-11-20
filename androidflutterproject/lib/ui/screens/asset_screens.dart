@@ -8,13 +8,14 @@ import '../../app/router.dart';
 import '../../app/sessions.dart';
 import '../../domain/asset_advisor.dart' as aa;
 import '../../domain/formatters.dart';
+import '../../domain/lumpsum_script.dart' as ls;
 import '../../domain/scenario.dart';
 import '../app_scope.dart';
 import '../chat_parts.dart';
 import '../icons.dart';
 import '../theme.dart';
 import '../widgets.dart';
-import 'join_screens.dart' show ConsentHero, customerNameOf;
+import 'join_screens.dart' show ConsentHero, customerNameOf, freshReply;
 
 class AssetConsentScreen extends StatelessWidget {
   const AssetConsentScreen({super.key, required this.entry});
@@ -27,23 +28,21 @@ class AssetConsentScreen extends StatelessWidget {
     if (app.assetFsm.state != 'CONSENT') {
       return EmptyScreen(title: 'AI 자산관리 상담', message: '진행 중인 동의 요청이 없어요.', onBack: app.back);
     }
-    final fin = app.store.state.finance;
     return ScreenFrame(
       white: true,
       appBar: WspAppBar(title: 'AI 자산관리 상담', onBack: app.back),
       footer: ButtonRow([
         AppButton('다음에 할게요', kind: BtnKind.ghost, onPressed: app.asset.decline),
-        AppButton('동의하고 시작', onPressed: app.asset.agree),
+        AppButton('상담 시작', onPressed: app.asset.agree),
       ]),
       children: [
-        ConsentHero(icon: AppIcons.target, title: '목표에 맞춰\n모을 돈과 투자할 돈을 정해요', desc: '연결된 금융 정보와 고객님 답변으로 계산하고, 방향을 제안해요.'),
+        ConsentHero(icon: AppIcons.target, title: '목표에 맞춰\n모을 돈과 투자할 돈을 정해요'),
         CardBox(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               CardTitle('조회·분석 동의 (필수)', icon: AppIcons.shield),
-              BulletList(['마이데이터로 연결된 기관(${fin.linked.join(', ')})의 잔액·입출금·카드 내역', '상담 중 고객님이 답한 정보']),
-              Fineprint('연결되지 않은 기관(${fin.notLinked.join(', ')})의 정보는 쓰지 않아요.', top: 4),
+              const BulletList(['마이데이터로 연결된 기관의 잔액·입출금·카드 내역', '상담 중 고객님이 답한 정보']),
             ],
           ),
         ),
@@ -54,7 +53,7 @@ class AssetConsentScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               CardTitle('이 상담에서 하지 않는 것', icon: AppIcons.lock),
-              const BulletList(['상품 가입·이체·해지', '방향 선택을 가입으로 처리하는 것 — 가입은 상품을 고른 뒤 따로 해요'], negative: true),
+              const BulletList(['상품 가입·이체·해지'], negative: true),
             ],
           ),
         ),
@@ -63,11 +62,8 @@ class AssetConsentScreen extends StatelessWidget {
   }
 }
 
-const List<String> _infoKeys = ['monthlyIncome', 'monthlyExpense', 'liquidAssets', 'investAssets', 'debt', 'goalAmount', 'goalMonths', 'plannedLumpSum', 'monthlySavingPref'];
+const List<String> _infoKeys = ['monthlyIncome', 'monthlyExpense', 'liquidAssets', 'investPace', 'investAssets', 'debt', 'goalAmount', 'goalMonths', 'plannedLumpSum', 'monthlySavingPref'];
 
-const List<String> _goalChips = ['해외주식 투자를 처음 시작해 보고 싶어요', '결혼 자금 3천만원을 3년 안에 모으고 싶어요', '비상자금이 충분한지 알고 싶어요'];
-
-const List<String> _talk = ['GOAL', 'ASKING', 'REVIEW'];
 
 class AssetScreen extends StatefulWidget {
   const AssetScreen({super.key, required this.entry});
@@ -105,13 +101,6 @@ class _AssetScreenState extends State<AssetScreen> {
       _state = st;
       scrollToLatest(_lastKey, _scroll);
     }
-    final canTalk = _talk.contains(st) && !a.thinking;
-    final ph = switch (st) {
-      'GOAL' => '목표를 말씀해 주세요',
-      'ASKING' => '편하게 답해 주세요 (예: 3천만원 정도)',
-      'REVIEW' => '바꿀 조건을 입력해 주세요',
-      _ => '지금은 위 버튼으로 진행해 주세요',
-    };
     final f = app.assetFsm;
     final w = MediaQuery.sizeOf(context).width;
     final side = w > 640 ? (w - 640) / 2 : 0.0;
@@ -136,12 +125,7 @@ class _AssetScreenState extends State<AssetScreen> {
                 ),
               ),
             ),
-            ChatInputBar(
-              placeholder: ph,
-              enabled: canTalk,
-              onSend: (v) => app.guard('asset-send', () => app.asset.answerText(v)),
-              fieldKey: const ValueKey('asset-input'),
-            ),
+            const ChatInputBar(fieldKey: ValueKey('asset-input')),
           ],
         ),
       ),
@@ -159,7 +143,10 @@ class _AssetActionPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = AppScope.controllerOf(context);
     final st = state;
-    if (a.thinking) return const SizedBox.shrink();
+    if (a.thinking || a.pendingAccept) return const SizedBox.shrink();
+    final rise = freshReply(a.chat);
+    final riseKey = a.chat.isNotEmpty ? a.chat.last.id : '';
+    Widget riseAt(int i, Widget w) => rise ? RiseIn(key: ValueKey('rise-$riseKey-$i'), delay: Duration(milliseconds: 70 * i), child: w) : w;
     Widget wrap(List<Widget> children) => Padding(
           padding: const EdgeInsets.only(top: 4),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
@@ -168,21 +155,23 @@ class _AssetActionPanel extends StatelessWidget {
 
     if (st == 'GOAL') {
       return wrap([
-        ChipWrap([for (final q in _goalChips) AnswerChip(q, large: true, onTap: () => app.guard('asset-send', () => app.asset.answerText(q)))]),
+        ChipWrap([
+          for (var i = 0; i < ls.assetGoalChips.length; i++)
+            riseAt(i, AnswerChip(ls.assetGoalChips[i], large: true, onTap: () => app.guard('asset-send', () => app.asset.answerText(ls.assetGoalChips[i])))),
+        ]),
       ]);
     }
     if (st == 'ASKING') {
       final q = aa.questions[a.pendingQuestion];
       if (q == null) return const SizedBox.shrink();
+      final n = q.options.length;
       return wrap([
-        Text('질문 ${a.questionsAsked}/${Policy.assetQuestionLimit}', style: ts(12, weight: FontWeight.w700, color: AppColors.text3)),
-        const SizedBox(height: 8),
-        ChipWrap([for (final o in q.options) AnswerChip(o.$1, large: true, onTap: () => chip('${o.$2}', o.$1))]),
+        ChipWrap([for (var i = 0; i < n; i++) riseAt(i, AnswerChip(q.options[i].$1, large: true, onTap: () => chip('${q.options[i].$2}', q.options[i].$1)))]),
         const SizedBox(height: 10),
         ChipWrap([
-          AnswerChip('잘 모르겠어요', onTap: () => chip('UNKNOWN', '잘 모르겠어요')),
-          AnswerChip('답하고 싶지 않아요', onTap: () => chip('REFUSED', '답하고 싶지 않아요')),
-          AnswerChip('지금 정보로 알려주세요', accent: true, onTap: () => chip('STOP', '지금 정보로 알려주세요')),
+          riseAt(n, AnswerChip('잘 모르겠어요', onTap: () => chip('UNKNOWN', '잘 모르겠어요'))),
+          riseAt(n + 1, AnswerChip('답하고 싶지 않아요', onTap: () => chip('REFUSED', '답하고 싶지 않아요'))),
+          riseAt(n + 2, AnswerChip('지금 정보로 알려주세요', accent: true, onTap: () => chip('STOP', '지금 정보로 알려주세요'))),
         ]),
       ]);
     }
@@ -217,8 +206,6 @@ class _AssetActionPanel extends StatelessWidget {
           const SizedBox(height: 4),
         ],
         AppButton('이 방향으로 할게요', onPressed: () => app.guard('asset-accept', app.asset.accept)),
-        const SizedBox(height: 6),
-        Text('조건을 바꾸려면 아래에 입력해 주세요. 예: "기간을 3년으로", "월 80만원씩"', style: ts(12, color: AppColors.text3, height: 1.5)),
       ]);
     }
     if (st == 'NEXT_ACTION') {
@@ -383,13 +370,28 @@ class _AssetEditSheetViewState extends State<AssetEditSheetView> {
     final key = widget.sheet.itemKey;
     final v = app.session.asset?.info?.items[key]?.value;
     final isMonths = aa.items[key]?.kind == 'months';
+    final now = v == null ? '입력 전' : aa.display(key, v);
+    if (aa.items[key]?.kind == 'pace') {
+      final q = aa.questions['investPace']!;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('투자 속도 고치기', style: ts(19, weight: FontWeight.w700, letterSpacing: -0.03)),
+          const SizedBox(height: 4),
+          Text('지금 $now', style: ts(14, color: AppColors.text2)),
+          const SizedBox(height: 14),
+          ChipWrap([for (final o in q.options) AnswerChip(o.$1, large: true, onTap: () => app.asset.savePace(key, o.$2))]),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text('${aa.itemLabel(key)} 고치기', style: ts(19, weight: FontWeight.w700, letterSpacing: -0.03)),
         const SizedBox(height: 4),
-        Text('지금 ${v == null ? '입력 전' : aa.display(key, v)}', style: ts(14, color: AppColors.text2)),
+        Text('지금 $now', style: ts(14, color: AppColors.text2)),
         const SizedBox(height: 14),
         Text(isMonths ? '개월 수' : '금액(만원)', style: ts(13, weight: FontWeight.w700, color: AppColors.text2)),
         const SizedBox(height: 6),
@@ -434,7 +436,6 @@ class ExploreScreen extends StatelessWidget {
       return EmptyScreen(title: '상품 둘러보기', message: '상담에서 정한 방향이 없어요.', buttonLabel: '전체 상품 보기', onButton: app.goProducts, onBack: app.back);
     }
     final t = a.handoffTerms!;
-    final list = aa.matchProducts(tags: t.tags, months: t.months, monthly: t.monthly);
     return ScreenFrame(
       appBar: WspAppBar(title: '상품 둘러보기', onBack: app.back),
       children: [
@@ -455,24 +456,23 @@ class ExploreScreen extends StatelessWidget {
                 '${t.purpose}${t.monthly != null ? ' · 월 ${formatMan(t.monthly)}' : ''}${t.months != null ? ' · ${t.months}개월' : ''}',
                 style: ts(16, weight: FontWeight.w700),
               ),
-              if (t.goalText.isNotEmpty) ...[const SizedBox(height: 4), Text('"${t.goalText}"', style: ts(12.5, color: AppColors.text2))],
             ],
           ),
         ),
-        const LeadText('정한 방향에 맞는 상품이에요.'),
-        for (final m in list)
+        const SizedBox(height: 12),
+        for (final p in products)
           Builder(builder: (context) {
-            final p = getProduct(m.productId)!;
+            final pick = p.id == DemoScenario.productId;
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: CardBox(
+                outline: pick,
+                color: pick ? const Color(0xFFF4F8FE) : null,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
                       ToneBadge(p.type, UiTone.info),
-                      const SizedBox(width: 6),
-                      m.fit ? const ToneBadge('방향과 맞음', UiTone.success) : const ToneBadge('일부 조건 다름', UiTone.neutral),
                       const Spacer(),
                       Text(p.rate, style: ts(13, weight: FontWeight.w700, color: AppColors.blue)),
                     ]),
@@ -480,12 +480,10 @@ class ExploreScreen extends StatelessWidget {
                     Text(p.name, style: ts(16, weight: FontWeight.w700)),
                     const SizedBox(height: 3),
                     Text(p.summary, style: ts(13, color: AppColors.text2, height: 1.5)),
-                    if (m.notes.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      for (final n in m.notes) Text('· $n', style: ts(12.5, color: AppColors.text2, height: 1.5)),
-                    ],
                     const SizedBox(height: 12),
-                    AppButton('이 상품 보기', kind: BtnKind.secondary, size: BtnSize.sm, block: false, onPressed: () => app.asset.selectProduct(p.id)),
+                    pick
+                        ? AppButton('이 계좌 보기', onPressed: () => app.asset.selectProduct(p.id))
+                        : AppButton('다른 상품', kind: BtnKind.ghost, size: BtnSize.sm, block: false, onPressed: () => app.asset.selectProduct(p.id)),
                   ],
                 ),
               ),

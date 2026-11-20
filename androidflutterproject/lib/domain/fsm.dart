@@ -1,5 +1,5 @@
-/// 상태머신 3종 (가입 지원 AI, 직접 가입, 자산관리).
-/// 간선은 (from, event, to, src)이고 src는 출처다: D 기본 설계, P1~P8 보강 원칙, S 시스템 보조.
+/// 상태머신 4종 (가입 지원 AI, 직접 가입, 자산관리, 목돈 불리기).
+/// 간선은 (from, event, to, src)이고 src는 출처다: D 기본 설계, P1~P9 보강 원칙, S 시스템 보조.
 /// 전이표에 없는 전이는 거부하고 이벤트 로그에 남긴다.
 library;
 
@@ -9,7 +9,7 @@ import 'event_log.dart';
 
 typedef FsmEdge = (String from, String event, String to, String src);
 
-enum FsmKind { join, direct, asset }
+enum FsmKind { join, direct, asset, lumpsum }
 
 class FsmDef {
   const FsmDef({required this.name, required this.initial, required this.edges});
@@ -105,6 +105,7 @@ final Map<FsmKind, FsmDef> fsmDefs = {
       ('GAP_CHECK', 'ASK', 'ASKING', 'D'),
       ('GAP_CHECK', 'LIMIT_OR_STOP', 'PROPOSABLE_CHECK', 'D'),
       ('ASKING', 'ANSWERED', 'RECALC_ANSWER', 'D'),
+      ('ASKING', 'SKIP_ONE', 'GAP_CHECK', 'D'),
       ('ASKING', 'UNKNOWN_OR_REFUSED', 'PROPOSABLE_CHECK', 'D'),
       ('ASKING', 'STOP_REQUEST', 'PROPOSABLE_CHECK', 'D'),
       ('RECALC_ANSWER', 'RECALCULATED', 'INTERPRETING', 'D'),
@@ -131,6 +132,36 @@ final Map<FsmKind, FsmDef> fsmDefs = {
       ('CLOSED', 'NEW_CASE', 'IDLE', 'S'),
       ('TO_JOIN', 'NEW_CASE', 'IDLE', 'S'),
       ..._exitP8(['CONSENT', 'GOAL', 'ASKING', 'GAP_CHECK', 'REVIEW', 'NEXT_ACTION', 'EXPLORE', 'HOLD'], 'CLOSED'),
+    ],
+  ),
+  FsmKind.lumpsum: FsmDef(
+    name: '목돈 불리기',
+    initial: 'IDLE',
+    edges: [
+      ('IDLE', 'START', 'INTRO', 'D'),
+      ('INTRO', 'SENT', 'ANALYZING', 'D'),
+      ('ANALYZING', 'SHOWN', 'GOAL', 'D'),
+      ('GOAL', 'SENT', 'DEBT_CHECK', 'D'),
+      ('DEBT_CHECK', 'STOP', 'CLOSED', 'D'),
+      ('DEBT_CHECK', 'PLAN', 'SPEND_PLAN', 'D'),
+      ('SPEND_PLAN', 'DONE', 'CLOSED', 'D'),
+      ('DEBT_CHECK', 'SENT', 'PROFILING', 'D'),
+      ('PROFILING', 'SENT', 'LOSS', 'D'),
+      ('LOSS', 'SENT', 'RECOMMEND', 'D'),
+      ('LOSS', 'GAP', 'SHORTFALL', 'D'),
+      ('SHORTFALL', 'SENT', 'RECOMMEND', 'D'),
+      // 성향을 이미 답한 뒤 목표를 바꿔 다시 판단하면, 성향은 다시 묻지 않고 부족 확인이나 추천으로 간다
+      ('SHORTFALL', 'ADJUST', 'DEBT_CHECK', 'D'),
+      ('DEBT_CHECK', 'PROFILED', 'RECOMMEND', 'D'),
+      ('DEBT_CHECK', 'GAP', 'SHORTFALL', 'D'),
+      ('RECOMMEND', 'OVERSEAS', 'NO_ACCOUNT', 'D'),
+      ('RECOMMEND', 'OTHER', 'CLOSED', 'D'),
+      ('INTRO', 'OVERSEAS', 'NO_ACCOUNT', 'P9'),
+      ('NO_ACCOUNT', 'OPEN', 'TO_JOIN', 'D'),
+      ('NO_ACCOUNT', 'LATER', 'CLOSED', 'D'),
+      ('TO_JOIN', 'NEW_CASE', 'IDLE', 'S'),
+      ('CLOSED', 'NEW_CASE', 'IDLE', 'S'),
+      ..._exitP8(['INTRO', 'ANALYZING', 'GOAL', 'DEBT_CHECK', 'SPEND_PLAN', 'PROFILING', 'LOSS', 'SHORTFALL', 'RECOMMEND', 'NO_ACCOUNT'], 'CLOSED'),
     ],
   ),
 };

@@ -7,6 +7,8 @@
 /// - 가입 요청은 고객이 승인 화면에서 승인했을 때만 보낸다.
 library;
 
+import 'dart:math';
+
 import '../domain/bank_state.dart';
 import '../domain/formatters.dart';
 import '../domain/fsm.dart';
@@ -21,6 +23,11 @@ import 'sessions.dart';
 
 const List<ScreenId> _screens = [ScreenId.join, ScreenId.apply, ScreenId.applyResult, ScreenId.support, ScreenId.home];
 const List<String> _auto = ['CHECKING', 'CLARIFYING', 'ROUTE_CHECK', 'RECHECKING', 'APPLYING', 'VERIFYING', 'TASK_OPEN', 'OPTIONS_READY', 'REMAINING', 'INVESTIGATING'];
+
+/// 해외주식 계좌 개설: 접수 뒤 은행 승인을 기다리는 시간(ms). 발표용으로 길게 둔다
+const int approvalWaitMs = 5000;
+
+final Random _rand = Random();
 
 const Map<String, String> exceptionLabel = {
   'QUERY_FAILED': '은행 기록 조회 실패',
@@ -50,8 +57,37 @@ class JoinFlow {
     if (j.chat.length > 80) j.chat.removeAt(0);
   }
 
-  void _sayAI(AiResult res, {String? kind, String? tone, String? key, String? why, List<String>? plan}) {
+  int _scaleMs(num ms) => (ms * app.bank.latencyScale).round();
+
+  /// 사용자 말이 들어오는 동안에는 로딩을 켜지 않는다.
+  Future<bool> _waitUserSlide(int ep) async {
+    final last = s?.chat.lastOrNull;
+    if (last == null || last.role != 'user') return true;
+    final left = _scaleMs(1000) - (nowMs() - last.at);
+    if (left > 0) {
+      _think(false);
+      await app.sleep(left);
+      if (_stale(ep)) return false;
+    }
+    return true;
+  }
+
+  /// 생각 1.5초 → 말풍선 → 읽을 시간 1초. 기다리는 동안 데모가 초기화됐으면 false
+  Future<bool> _sayAI(AiResult res, {String? kind, String? tone, String? key, String? why, List<String>? plan}) async {
+    final ep = app.epoch;
+    if (!await _waitUserSlide(ep)) return false;
+    final thinkMs = _scaleMs(1500), easeMs = _scaleMs(1000);
+    if (thinkMs > 0) {
+      _think(true);
+      await app.sleep(thinkMs);
+      if (_stale(ep)) return false;
+    }
+    if (s == null) return false;
+    s!.thinking = false;
     _push((id, at) => ChatMsg(id: id, at: at, role: 'ai', text: res.output.message, fallback: res.fallback, kind: kind, tone: tone, key: key, why: why, plan: plan));
+    app.refresh(_screens);
+    if (easeMs > 0) await app.sleep(easeMs);
+    return !_stale(ep);
   }
 
   void _sayUser(String text) => _push((id, at) => ChatMsg(id: id, at: at, role: 'user', text: text));
@@ -75,9 +111,21 @@ class JoinFlow {
   }
 
   /* ---------------- 시작 / 동의 / 종료 ---------------- */
-  bool start(String productId, [HandoffTerms? ctx]) {
+  /// [goalText]·[monthly]는 목돈 상담에서 넘어올 때 쓴다
+  bool start(String productId, {HandoffTerms? ctx, String? goalText, int? monthly}) {
     if (fsm.state != 'IDLE') return false;
-    app.session.join = JoinSession(caseId: newId('JOIN'), productId: productId, assetContext: ctx);
+    final context = ctx ?? (goalText != null || monthly != null ? HandoffTerms(purpose: '', tags: const [], monthly: monthly, months: null, goalText: goalText ?? '') : null);
+    app.session.join = JoinSession(caseId: newId('JOIN'), productId: productId, assetContext: context);
+    if (context != null) {
+      final goal = context.goalText.isNotEmpty ? context.goalText : (app.session.customerContext?.goal ?? '');
+      app.publishContext(
+        selectedProductId: productId,
+        goal: goal,
+        financialSummary: context.monthly != null ? FinancialSummary(monthly: context.monthly, source: '계좌 정보 기준', adjustable: true) : null,
+      );
+    } else {
+      app.publishContext(selectedProductId: productId);
+    }
     fsm.transition('START', {'productId': productId});
     return true;
   }
@@ -86,8 +134,8 @@ class JoinFlow {
     if (fsm.state != 'CONSENT') return;
     fsm.transition('AGREE');
     s!.metrics.screens += 1;
-    app.navigate(ScreenId.join, replace: true);
-    await advance();
+    s!.thinking = true;
+    await Future.wait([app.navigate(ScreenId.join, replace: true), advance()]);
   }
 
   List<String> doneTaskLabels() {
@@ -121,8 +169,13 @@ class JoinFlow {
     if (!fsm.can('NEW_CASE')) return;
     final j = s;
     if (j != null && j.metrics.endedAt != null) app.session.lastJoinMetrics = j.metrics;
+    // 해외주식 계좌 개설이 끝난 뒤 홈으로 돌아오면 홈에서 완료 안내를 보여 준다
+    final prod = j != null ? getProduct(j.productId) : null;
+    final opened = fsm.state == 'COMPLETED' && prod != null && prod.isBrokerage;
     fsm.transition('NEW_CASE');
     app.session.join = null;
+    app.session.openedNotice = opened ? OpenedNotice(productId: j!.productId, appId: j.appId, at: nowMs()) : null;
+    app.save();
     app.navigate(ScreenId.home, resetHistory: true);
   }
 
@@ -203,11 +256,41 @@ class JoinFlow {
       j.skipped.add(('다른 은행 계좌', '마이데이터로 확인됨 (${a.bank})'));
     }
     if (j.skipped.isNotEmpty) app.events.add('AI', '묻지 않은 질문: ${j.skipped.map((x) => '${x.$1}(${x.$2})').join(', ')}');
-    final ai = await app.ai.joinExplainCheck(j.evaluation!, RouteResult(status: '-'));
     if (_stale(ep)) return;
     _think(false);
-    _sayAI(ai, kind: 'check');
+    if (!await _revealChecks(ep)) return;
     fsm.transition(j.evaluation!.allMet ? 'NONE_MISSING' : 'MISSING', {'unmet': j.evaluation!.unmet});
+  }
+
+  /// 조건은 한꺼번에 체크하지 않고, 0.2~3초 사이에 각자 확인된 것처럼 보여 준다.
+  Future<bool> _revealChecks(int ep) async {
+    final j = s;
+    if (j == null || j.evaluation == null) return false;
+    final ids = j.evaluation!.conditions.map((c) => c.id).toList();
+    if (!(app.bank.latencyScale > 0)) {
+      j.checkPending = null;
+      j.checkDone = null;
+      return true;
+    }
+    j.checkPending = ids;
+    j.checkDone = [];
+    app.refresh(_screens);
+    await Future.wait([
+      for (final id in ids)
+        Future.delayed(Duration(milliseconds: _scaleMs(200 + _rand.nextDouble() * 2800)), () {
+          final cur = s;
+          if (cur != null && !_stale(ep) && cur.checkPending != null) {
+            cur.checkDone!.add(id);
+            cur.checkFresh = id;
+            app.refresh(_screens);
+          }
+        }),
+    ]);
+    if (_stale(ep) || s == null) return false;
+    j.checkPending = null;
+    j.checkDone = null;
+    j.checkFresh = null;
+    return true;
   }
 
   /// 고객 답변을 기다려야 하면 true
@@ -246,7 +329,7 @@ class JoinFlow {
     j.pendingKey = key;
     j.questionsAsked += 1;
     j.metrics.questions += 1;
-    _sayAI(ai, kind: 'question', key: key, why: ai.output.why ?? constraintWhy[key]);
+    await _sayAI(ai, kind: 'question', key: key, why: ai.output.why ?? constraintWhy[key]);
     return true;
   }
 
@@ -266,7 +349,7 @@ class JoinFlow {
     final ai = await app.ai.joinExplainNoRoute(route.cause);
     if (_stale(ep)) return;
     _think(false);
-    _sayAI(ai, kind: 'noroute', tone: 'warning');
+    await _sayAI(ai, kind: 'noroute', tone: 'warning');
     _escalate(route.cause?.type == 'CYCLE' ? 'CYCLE' : 'NO_ROUTE', ai.output.message, route.cause);
     fsm.transition(event, {'cause': route.cause?.toJson()});
   }
@@ -302,7 +385,7 @@ class JoinFlow {
       for (final o in route.options) o.withShown(o.availability != 'BLOCKED' && o.reachable && (allowed == null || allowed.contains(o.actionId))),
     ];
     j.presentedKey = key;
-    _sayAI(ai, kind: 'options', plan: route.steps.map((x) => x.label).toList());
+    await _sayAI(ai, kind: 'options', plan: route.steps.map((x) => x.label).toList());
   }
 
   /* ---------------- 고객 입력 ---------------- */
@@ -321,20 +404,20 @@ class JoinFlow {
     final out = ai.output;
     final types = out.actions.map((a) => a.type).toList();
     if (types.contains('ESCALATE')) {
-      _sayAI(ai);
+      await _sayAI(ai);
       return requestConsult('CUSTOMER_REQUEST', '고객이 상담 연결을 요청했어요.');
     }
     if (types.contains('END')) {
-      _sayAI(ai);
+      await _sayAI(ai);
       return exit();
     }
     if (out.intent == 'REPORT_MISMATCH') {
-      _sayAI(ai);
+      await _sayAI(ai);
       return _reportMismatch();
     }
     final sets = out.actions.where((a) => a.type == 'SET_CONSTRAINT').toList();
     if (sets.isEmpty) {
-      _sayAI(ai);
+      await _sayAI(ai);
       app.refresh(_screens);
       return;
     }
@@ -480,33 +563,33 @@ class JoinFlow {
       final ai = await app.ai.joinAfterRecheck('EXCEPTION');
       if (_stale(ep)) return;
       _think(false);
-      _sayAI(ai, tone: 'warning');
+      await _sayAI(ai, tone: 'warning');
       fsm.transition('EXCEPTION', {'cause': cause});
       return;
     }
     j.currentTask = null;
     j.exception = null;
     if (ev.allMet) {
-      final ai = await app.ai.joinAfterRecheck('ALL_MET');
       if (_stale(ep)) return;
       _think(false);
-      _sayAI(ai, kind: 'ready');
       fsm.transition('ALL_MET');
       return;
     }
-    var detail = '';
-    if (status == 'CANCELLED') {
-      detail = '업무를 마치지 않고 닫으셨어요.';
-    } else if (status == 'PARTIAL') {
-      detail = '일부 단계만 저장돼서 아직 완료되지 않았어요.';
-    } else if (ct != null && status == 'COMPLETED') {
-      detail = '${josa(getTask(ct.taskId)!.label, '이')} 은행 기록에 반영됐어요.';
-    }
     final remain = [for (final x in ev.conditions) if (x.status != 'MET') x.label];
-    final ai = await app.ai.joinAfterRecheck('REMAINING', '$detail 남은 조건은 ${josa(remain.join(', '), '이에요')}.');
-    if (_stale(ep)) return;
-    _think(false);
-    _sayAI(ai);
+    var sentence = '';
+    if (status == 'CANCELLED') {
+      sentence = '업무를 마치지 않고 닫으셨어요. 남은 조건은 ${josa(remain.join(', '), '이에요')}.';
+    } else if (status == 'PARTIAL') {
+      sentence = '일부 단계만 저장돼서 아직 완료되지 않았어요. 남은 조건은 ${josa(remain.join(', '), '이에요')}.';
+    }
+    if (sentence.isNotEmpty) {
+      final ai = await app.ai.joinAfterRecheck('REMAINING', sentence);
+      if (_stale(ep)) return;
+      _think(false);
+      await _sayAI(ai);
+    } else {
+      _think(false);
+    }
     fsm.transition('REMAINING', {'remain': ev.unmet});
   }
 
@@ -663,6 +746,9 @@ class JoinFlow {
 
   Future<void> _stepVerify(int ep) async {
     final j = s!;
+    // 해외주식 계좌는 은행 승인까지 약 5초 기다린다. 그동안 승인 대기 화면이 보인다
+    await app.sleep(_scaleMs(product.isBrokerage ? approvalWaitMs : 2800));
+    if (_stale(ep)) return;
     final r = await app.bank.getApplicationResult(j.appId!);
     if (_stale(ep)) return;
     if (r.ok) j.application = r.data;
@@ -695,6 +781,35 @@ class JoinFlow {
   void resume() {
     if (s == null) return;
     if (_auto.contains(fsm.state) && !_running) advance();
+  }
+
+  /// 시연용 요약 진행. 외환거래가 은행 사실로 반영된 뒤에만
+  /// 남은 업무를 기존 처리·재조회로 넘기고, 승인 화면에서 멈춘다.
+  Future<void> summarizeRemaining() async {
+    final ep = app.epoch;
+    for (var i = 0; i < 6; i++) {
+      if (_stale(ep)) return;
+      final st = fsm.state;
+      if (st != 'OPTIONS_READY' && st != 'REMAINING') return;
+      if (app.store.state.facts['fxRegistered'] != true) return;
+      final j = s!;
+      final steps = j.route?.steps ?? const [];
+      if (steps.isEmpty) return;
+      final step = steps.first;
+      final task = getTask(step.actionId)!;
+      final opened = app.bank.openTask(step.actionId, mode: 'modal');
+      if (!opened.ok) return;
+      final sid = opened.data!;
+      j.currentTask = CurrentTask(taskId: step.actionId, sessionId: sid, facts: task.effects.keys.toList());
+      j.metrics.tasks += 1;
+      j.pendingKey = null;
+      fsm.transition('TASK_OPENED', {'taskId': step.actionId, 'sessionId': sid});
+      final ran = await app.bank.runTask(sid, const {});
+      if (_stale(ep)) return;
+      final status = ran.ok ? ran.data!.status : 'REJECTED';
+      await modalClosed(status);
+      if (status != 'COMPLETED') return;
+    }
   }
 
   /// 상담 인계 요약 재료
@@ -730,7 +845,7 @@ class JoinFlow {
       app.toast('다른 상품의 가입 지원이 진행 중이에요. 홈에서 이어 가거나 멈춰 주세요.', UiTone.warning);
       return;
     }
-    if (start(productId, ctx)) await app.navigate(ScreenId.joinConsent);
+    if (start(productId, ctx: ctx)) await app.navigate(ScreenId.joinConsent);
   }
 
   Future<void> retryCheck() async {

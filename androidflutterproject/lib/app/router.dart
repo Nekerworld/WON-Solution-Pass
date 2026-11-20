@@ -15,7 +15,9 @@ enum ScreenId {
   direct('direct'),
   assetConsent('asset-consent'),
   asset('asset'),
-  explore('explore');
+  explore('explore'),
+  lumpsum('lumpsum'),
+  spend('spend');
 
   const ScreenId(this.webId);
 

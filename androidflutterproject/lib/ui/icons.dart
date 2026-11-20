@@ -203,6 +203,18 @@ abstract final class AppIcons {
     height: 32,
   );
 
+  /// 홈 추천 질문 포춘쿠키
+  static final cookie = SvgArt(
+    [
+      _p('M6.5 17.2c.3-6.4 5.2-11.2 10.6-11.2 2.5 0 3.8 1.7 3.4 3.4-.3 1.2-1.2 1.9-2.1 2.1 4.1.8 7.8 4 7.8 7.8 0 4.8-4.6 8-9.6 8-5.6 0-10.5-3.8-10.1-10.1z', fill: _hex(0xFFF0C36A), stroke: null),
+      _p('M8 18.2c1.8-5 5.6-8.4 10-8.8', stroke: _hex(0xFFD89A3C), sw: 1.2),
+      _p('M18.6 15.4h8.4c.5 0 .8.4.7.8l-.7 2.4c-.1.4-.4.6-.8.6h-6.8c-.5 0-.9-.5-.7-1l.6-2.4c.1-.2.3-.4.6-.4z', fill: _hex(0xFFFFFAF0), stroke: null),
+      _p('M20.6 16.8h5.2M20.2 18h4', stroke: _hex(0xFFE4D2AE), sw: 0.7),
+    ],
+    width: 32,
+    height: 32,
+  );
+
   /// 업무 아이콘 이름 → 아이콘
   static SvgArt task(String name) => switch (name) {
         'idcard' => idcard,

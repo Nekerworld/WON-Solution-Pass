@@ -19,6 +19,13 @@ import '../widgets.dart';
 
 String customerNameOf(AppController app) => app.store.state.customer.name;
 
+/// 방금 도착한 AI 답이면 아래 칩·카드를 순서대로 올라오게 한다
+bool freshReply(List<ChatMsg> chat) {
+  if (chat.isEmpty) return false;
+  final last = chat.last;
+  return last.role == 'ai' && DateTime.now().millisecondsSinceEpoch - last.at < 1600;
+}
+
 /* ==================================================================
  * 동의
  * ================================================================== */
@@ -41,21 +48,20 @@ class JoinConsentScreen extends StatelessWidget {
       appBar: WspAppBar(title: 'AI 가입 지원', onBack: app.back),
       footer: ButtonRow([
         AppButton('다음에 할게요', kind: BtnKind.ghost, onPressed: app.join.exit),
-        AppButton('동의하고 시작', onPressed: () => app.guard('join-agree', app.join.agree)),
+        AppButton('가입 조건 확인', onPressed: () => app.guard('join-agree', app.join.agree)),
       ]),
       children: [
-        ConsentHero(icon: AppIcons.spark, title: '${p.name}\n가입을 도와드릴게요', desc: '가입 조건 중 부족한 것을 확인하고, 해결 순서와 필요한 업무 화면을 안내해요.'),
+        ConsentHero(icon: AppIcons.spark, title: '${p.name}\n가입을 도와드릴게요'),
         CardBox(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               CardTitle('조회·분석 동의 (필수)', icon: AppIcons.shield),
               const BulletList([
-                '실명확인·계좌·인증서·고객정보 등록 기록 (우리은행)',
+                '실명확인·계좌·인증서·고객정보 등록 기록',
                 '마이데이터로 연결된 다른 은행 계좌 목록',
                 '로그인 때 확인된 휴대폰 본인 명의 여부',
               ]),
-              const Fineprint('은행이 이미 아는 정보는 다시 묻지 않아요.', top: 4),
             ],
           ),
         ),
@@ -66,10 +72,7 @@ class JoinConsentScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               CardTitle('이 동의로 하지 않는 것', icon: AppIcons.lock),
-              const BulletList([
-                '상품 가입 신청 — 마지막에 고객님 승인을 따로 받아요',
-                '가입 조건을 바꾸거나 새로 만드는 것 — 조건은 은행 기준을 그대로 써요',
-              ], negative: true),
+              const BulletList(['상품 가입 자동 신청'], negative: true),
             ],
           ),
         ),
@@ -80,11 +83,11 @@ class JoinConsentScreen extends StatelessWidget {
 
 /// 동의 화면 머리
 class ConsentHero extends StatelessWidget {
-  const ConsentHero({super.key, required this.icon, required this.title, required this.desc});
+  const ConsentHero({super.key, required this.icon, required this.title, this.desc});
 
   final SvgArt icon;
   final String title;
-  final String desc;
+  final String? desc;
 
   @override
   Widget build(BuildContext context) {
@@ -102,8 +105,10 @@ class ConsentHero extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Text(title, style: ts(21, weight: FontWeight.w700, height: 1.4, letterSpacing: -0.03)),
-          const SizedBox(height: 8),
-          Text(desc, style: ts(14, color: AppColors.text2, height: 1.55)),
+          if (desc != null) ...[
+            const SizedBox(height: 8),
+            Text(desc!, style: ts(14, color: AppColors.text2, height: 1.55)),
+          ],
         ],
       ),
     );
@@ -182,12 +187,7 @@ class _JoinScreenState extends State<JoinScreen> {
               ),
             ),
             if (canTalk) QuickChips(items: const ['상담 연결해 주세요', '완료했다고 떴는데 다시 하래요', '그만할래요'], onTap: app.join.sendText),
-            ChatInputBar(
-              placeholder: canTalk ? '상황을 편하게 말씀해 주세요' : '지금은 위 버튼으로 진행해 주세요',
-              enabled: canTalk,
-              onSend: app.join.sendText,
-              fieldKey: const ValueKey('join-input'),
-            ),
+            const ChatInputBar(fieldKey: ValueKey('join-input')),
           ],
         ),
       ),
@@ -195,89 +195,112 @@ class _JoinScreenState extends State<JoinScreen> {
   }
 }
 
-class _Checklist extends StatelessWidget {
+/// 가입 조건 체크리스트. 확인 중에는 조건마다 결과가 하나씩 드러난다 (checkPending/checkDone).
+class _Checklist extends StatefulWidget {
   const _Checklist({required this.j, required this.state});
 
   final JoinSession j;
   final String state;
 
   @override
+  State<_Checklist> createState() => _ChecklistState();
+}
+
+class _ChecklistState extends State<_Checklist> {
+  bool _entered = false;
+
+  @override
   Widget build(BuildContext context) {
+    final j = widget.j;
     final p = getProduct(j.productId)!;
     final ev = j.evaluation;
-    final met = ev != null ? ev.conditions.where((c) => c.status == 'MET').length : 0;
-    final total = ev != null ? ev.conditions.length : p.conditions.length;
-    final r = j.route;
-    final showPlan = r != null && r.status == 'PLAN' && const ['OPTIONS_READY', 'REMAINING', 'TASK_OPEN', 'CLARIFYING'].contains(state);
-    final ready = state == 'READY_TO_APPLY';
+    final ids = ev != null ? [for (final c in ev.conditions) c.id] : p.conditions;
+    final byId = {if (ev != null) for (final c in ev.conditions) c.id: c};
+    final checking = j.checkPending != null;
+    final done = j.checkDone ?? const <String>[];
+    final fresh = j.checkFresh;
+    final entered = _entered;
+    if (!_entered) WidgetsBinding.instance.addPostFrameCallback((_) => _entered = true);
+    final met = ev != null ? ev.conditions.where((c) => c.status == 'MET' && (!checking || done.contains(c.id))).length : 0;
+    final ready = widget.state == 'READY_TO_APPLY';
+    final rows = <Widget>[];
+    for (var i = 0; i < ids.length; i++) {
+      final id = ids[i];
+      final cond = conditions[id];
+      final label = facts[cond?.fact]?.short ?? cond?.label ?? id;
+      final revealed = !checking || done.contains(id);
+      final isMet = revealed && byId[id]?.status == 'MET';
+      final row = Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            _CkTick(met: isMet, loading: checking && !revealed, pop: fresh == id),
+            const SizedBox(width: 10),
+            Expanded(child: Text(label, style: ts(14, weight: FontWeight.w600))),
+          ],
+        ),
+      );
+      rows.add(entered ? row : RiseIn(key: ValueKey('ck-$id'), delay: Duration(milliseconds: i * 80), child: row));
+    }
     return Container(
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(color: ready ? AppColors.success : AppColors.line, width: ready ? 1.5 : 1),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [if (ready) const BoxShadow(color: AppColors.success, spreadRadius: 2), ...shadowCard],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text('가입 조건 $met/$total', style: ts(15, weight: FontWeight.w700)),
+              Text('가입 조건 $met/${ids.length}', style: ts(14, weight: FontWeight.w700)),
               const SizedBox(width: 8),
-              Expanded(child: Text(p.name, textAlign: TextAlign.right, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(12.5, color: AppColors.text3))),
+              Expanded(
+                child: Text(p.name, textAlign: TextAlign.right, maxLines: 1, overflow: TextOverflow.ellipsis, style: ts(12, weight: FontWeight.w600, color: AppColors.blue)),
+              ),
             ],
           ),
-          const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadius.pill),
-            child: LinearProgressIndicator(
-              value: total == 0 ? 0 : met / total,
-              minHeight: 6,
-              backgroundColor: AppColors.neutralBg,
-              color: ready ? AppColors.success : AppColors.blue,
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (ev == null)
-            _ckRow('은행 기록 확인 전', const ToneBadge('대기', UiTone.neutral))
-          else
-            for (final c in ev.conditions) _ckRow(c.label, CondBadge(c.status)),
-          if (showPlan) ...[
-            const SizedBox(height: 10),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: const Color(0xFFF4F8FE), borderRadius: BorderRadius.circular(12)),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    SvgIcon(AppIcons.route, size: 15, color: AppColors.blue),
-                    const SizedBox(width: 5),
-                    Text('해결 순서', style: ts(13, weight: FontWeight.w700, color: AppColors.blue)),
-                  ]),
-                  const SizedBox(height: 6),
-                  for (var i = 0; i < r.steps.length; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: Text(
-                        '${i + 1}. ${r.steps[i].label}',
-                        style: ts(13, weight: i == 0 ? FontWeight.w700 : FontWeight.w400, color: i == 0 ? AppColors.text : AppColors.text2),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
+          const SizedBox(height: 4),
+          ...rows,
         ],
       ),
     );
   }
+}
 
-  Widget _ckRow(String label, Widget badge) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(children: [Expanded(child: Text(label, style: ts(13.5, color: AppColors.text2))), badge]),
-      );
+class _CkTick extends StatelessWidget {
+  const _CkTick({required this.met, required this.loading, required this.pop});
+
+  final bool met;
+  final bool loading;
+  final bool pop;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) return const Spinner(size: 18, stroke: 1.5, track: Color(0xFFE4E9F0));
+    final circle = Container(
+      width: 18,
+      height: 18,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: met ? AppColors.blue : Colors.transparent,
+        shape: BoxShape.circle,
+        border: Border.all(color: met ? AppColors.blue : const Color(0xFFD5DBE3), width: 1.5),
+      ),
+      child: met ? SvgIcon(AppIcons.check, size: 11, color: Colors.white) : null,
+    );
+    if (!met || !pop) return circle;
+    return TweenAnimationBuilder<double>(
+      key: const ValueKey('pop'),
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.ease,
+      builder: (context, t, child) => Opacity(opacity: t, child: Transform.scale(scale: 0.3 + 0.7 * t, child: child)),
+      child: circle,
+    );
+  }
 }
 
 class _JoinActionPanel extends StatelessWidget {
@@ -292,18 +315,23 @@ class _JoinActionPanel extends StatelessWidget {
     final st = state;
     if (j.thinking) return const SizedBox.shrink();
     Widget wrap(Widget child) => Padding(padding: const EdgeInsets.only(top: 4), child: child);
+    final rise = freshReply(j.chat);
+    final riseKey = j.chat.isNotEmpty ? j.chat.last.id : '';
+    Widget riseAt(int i, Widget w) => rise ? RiseIn(key: ValueKey('rise-$riseKey-$i'), delay: Duration(milliseconds: 70 * i), child: w) : w;
     final q = j.pendingKey;
     if (q != null && (st == 'CLARIFYING' || st == 'REMAINING')) {
       return wrap(ChipWrap([
-        AnswerChip('네, 있어요', large: true, accent: true, onTap: () => app.join.answer(q, true)),
-        AnswerChip('아니요, 없어요', large: true, onTap: () => app.join.answer(q, false)),
+        riseAt(0, AnswerChip('네, 있어요', large: true, accent: true, onTap: () => app.join.answer(q, true))),
+        riseAt(1, AnswerChip('아니요, 없어요', large: true, onTap: () => app.join.answer(q, false))),
       ]));
     }
     if ((st == 'OPTIONS_READY' || st == 'REMAINING') && j.options.isNotEmpty) {
+      final shown = j.options.where((o) => o.shown).toList();
+      final blocked = j.options.where((o) => !o.shown).toList();
       return wrap(Column(
         children: [
-          for (final o in j.options.where((o) => o.shown)) _OptionCard(option: o, onTap: () => app.join.chooseOption(o.actionId)),
-          for (final o in j.options.where((o) => !o.shown)) _OptionCard(option: o),
+          for (var i = 0; i < shown.length; i++) riseAt(i, _OptionCard(option: shown[i], onTap: () => app.join.chooseOption(shown[i].actionId))),
+          for (var i = 0; i < blocked.length; i++) riseAt(shown.length + i, _OptionCard(option: blocked[i])),
         ],
       ));
     }
@@ -512,11 +540,6 @@ class _ApplyScreenState extends State<ApplyScreen> {
         );
 
     final head = <Widget>[
-      const SizedBox(height: 8),
-      NoticeBox(
-        spans: [bold('가입 준비 완료는 가입 완료가 아니에요.'), const TextSpan(text: '\n내용을 확인하고 승인하시면 그때 은행에 가입을 요청해요.')],
-        tone: UiTone.info,
-      ),
       if (j.applyNotice != null) ...[
         const SizedBox(height: 8),
         NoticeBox(body: j.applyNotice!.text, tone: toneOf(j.applyNotice!.tone), icon: AppIcons.alert),
@@ -544,10 +567,6 @@ class _ApplyScreenState extends State<ApplyScreen> {
       const fx = 'WON 외화통장(USD) 1002-***-552190';
       body = [
         ...head,
-        if (ctx?.monthly != null) ...[
-          const SizedBox(height: 8),
-          NoticeBox(body: '자산관리 상담에서 정한 방향은 월 ${formatMan(ctx!.monthly)} 투자예요. 실제 주문은 계좌를 연 뒤 고객님이 직접 해요.', icon: AppIcons.target),
-        ],
         const SizedBox(height: 12),
         CardBox(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [CardTitle(p.name), KvRows([KvRow.text(p.rateLabel ?? '', p.rateValue ?? '')])])),
         const SizedBox(height: 12),
@@ -573,10 +592,6 @@ class _ApplyScreenState extends State<ApplyScreen> {
       final ctrl = _monthly ??= TextEditingController(text: '$initialMonthly');
       body = [
         ...head,
-        if (ctx != null) ...[
-          const SizedBox(height: 8),
-          NoticeBox(body: '자산관리 상담에서 정한 방향(월 ${formatMan(ctx.monthly ?? 0)} · ${ctx.months ?? '-'}개월)을 기본값으로 넣었어요. 바꿔도 돼요.', icon: AppIcons.target),
-        ],
         const SizedBox(height: 12),
         CardBox(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [CardTitle(p.name), KvRows([KvRow.text('금리', p.rate)])])),
         const SizedBox(height: 12),
@@ -657,22 +672,48 @@ class ApplyResultScreen extends StatelessWidget {
       if (requestId != null) KvRow.text('요청 번호', requestId, mono: true),
     ];
     final VoidCallback newCase = isJoin ? app.join.newCase : app.direct.newCase;
+    final brokerage = p.isBrokerage;
+    if (brokerage && appRec != null && const ['VERIFYING', 'D_VERIFYING', 'COMPLETED', 'D_DONE'].contains(st)) {
+      rows.insert(0, KvRow.text('접수 번호', appRec.id, strong: true));
+    }
 
     Widget? icon;
+    Widget? extra;
     UiTone tone;
     String title;
     String desc;
     Widget? foot;
-    if (const ['APPLYING', 'VERIFYING', 'D_VERIFYING'].contains(st)) {
+    if (brokerage && const ['APPLYING', 'VERIFYING', 'D_VERIFYING'].contains(st)) {
+      final applying = st == 'APPLYING';
       icon = const Spinner(size: 34, stroke: 3.5);
       tone = UiTone.neutral;
-      title = '가입 결과를 확인하고 있어요';
-      desc = '은행 처리 결과가 확인될 때까지 다시 신청하지 마세요.';
-    } else if (st == 'COMPLETED' || st == 'D_DONE') {
-      rows.insert(0, KvRow.text('가입 번호', appRec?.id ?? '-', strong: true));
+      title = applying ? '신청을 접수하고 있어요' : '은행 승인을 기다리고 있어요';
+      desc = applying ? '잠시만 기다려 주세요.' : '신청은 접수됐어요. 은행이 계좌 개설을 승인하는 중이에요. 다시 신청하지 말고 잠시만 기다려 주세요.';
+      extra = ApprovalTimeline(
+        key: ValueKey('tl-$st'),
+        steps: applying ? _brokerSteps.sublist(0, 2) : _brokerSteps,
+        wait: !applying,
+        marks: true,
+        gap: applying ? 0.7 : 0.15,
+      );
+    } else if (const ['APPLYING', 'VERIFYING', 'D_VERIFYING'].contains(st)) {
+      icon = const Spinner(size: 34, stroke: 3.5);
+      tone = UiTone.neutral;
+      title = '은행 심사에 등록하고 있어요';
+      desc = '신청 접수부터 승인 대기까지 순서대로 확인해요. 다시 신청하지 마세요.';
+      extra = const ApprovalTimeline(key: ValueKey('tl-wait'));
+    } else if (brokerage && (st == 'COMPLETED' || st == 'D_DONE')) {
       tone = UiTone.success;
-      title = '가입이 완료됐어요';
-      desc = '은행 처리 결과로 확인했어요.';
+      title = '해외주식 계좌 개설이 완료됐어요';
+      desc = '은행 승인이 끝났어요. 홈에서 새 계좌를 확인할 수 있어요.';
+      extra = const ApprovalTimeline(key: ValueKey('tl-done'), steps: _brokerSteps, marks: true, gap: 0.25);
+      foot = AppButton('홈으로', onPressed: newCase);
+    } else if (st == 'COMPLETED' || st == 'D_DONE') {
+      rows.insert(0, KvRow.text('접수 번호', appRec?.id ?? '-', strong: true));
+      tone = UiTone.success;
+      title = '가입 신청이 접수됐어요';
+      desc = '은행 심사에 등록되었어요.';
+      extra = const ApprovalTimeline(key: ValueKey('tl-done'));
       foot = AppButton('홈으로', onPressed: newCase);
     } else if (st == 'FAILED' || st == 'D_FAILED') {
       tone = UiTone.danger;
@@ -705,11 +746,92 @@ class ApplyResultScreen extends StatelessWidget {
       appBar: const WspAppBar(title: '가입 결과', noBack: true),
       footer: foot,
       children: [
-        ResultHead(tone: tone, icon: icon == null ? toneIcon : null, iconChild: icon, title: title, desc: desc.isEmpty ? null : desc),
+        ResultHead(tone: tone, icon: icon == null ? toneIcon : null, iconChild: icon, title: title, desc: desc.isEmpty ? null : desc, extra: extra),
         if (rows.isNotEmpty) CardBox(child: KvRows(rows)),
       ],
     );
   }
+}
+
+/// 해외주식 계좌 개설: 신청 접수 → 은행 승인 대기(약 5초) → 개설 완료
+const List<String> _brokerSteps = ['신청 접수', '본인/조건 재확인', '은행 심사 등록', '은행 승인'];
+
+/// 접수·심사 순서. [wait]이면 마지막 단계를 대기 표시(깜빡이는 점, '중')로 둔다.
+class ApprovalTimeline extends StatefulWidget {
+  const ApprovalTimeline({
+    super.key,
+    this.steps = const ['신청 접수', '본인/조건 재확인', '은행 심사 등록', '승인 대기'],
+    this.wait = false,
+    this.marks = false,
+    this.gap = 0.55,
+  });
+
+  final List<String> steps;
+  final bool wait;
+  final bool marks;
+
+  /// 단계 사이 등장 간격(초)
+  final double gap;
+
+  @override
+  State<ApprovalTimeline> createState() => _ApprovalTimelineState();
+}
+
+class _ApprovalTimelineState extends State<ApprovalTimeline> with SingleTickerProviderStateMixin {
+  late final AnimationController _blink = AnimationController(vsync: this, duration: const Duration(milliseconds: 1000));
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.wait) _blink.repeat();
+  }
+
+  @override
+  void dispose() {
+    _blink.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <Widget>[];
+    for (var i = 0; i < widget.steps.length; i++) {
+      final waiting = widget.wait && i == widget.steps.length - 1;
+      final text = Text('${widget.steps[i]}${waiting ? ' 중' : ''}', style: ts(14, color: waiting ? AppColors.text3 : AppColors.text2));
+      final row = widget.marks
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                waiting
+                    ? AnimatedBuilder(
+                        animation: _blink,
+                        builder: (context, child) => Opacity(opacity: _blink.value < 0.5 ? 1 : 0, child: child),
+                        child: _dot(const Color(0xFFB7C2D0)),
+                      )
+                    : _dot(const Color(0xFF1FA463)),
+                const SizedBox(width: 8),
+                text,
+              ],
+            )
+          : text;
+      items.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: RiseIn(delay: Duration(milliseconds: (i * widget.gap * 1000).round()), duration: const Duration(milliseconds: 450), child: row),
+      ));
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: widget.marks ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+          children: items,
+        ),
+      ),
+    );
+  }
+
+  Widget _dot(Color c) => Container(width: 8, height: 8, decoration: BoxDecoration(color: c, shape: BoxShape.circle));
 }
 
 /* ==================================================================

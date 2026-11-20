@@ -8,6 +8,8 @@ import 'screens/asset_screens.dart';
 import 'screens/direct_screen.dart';
 import 'screens/home_screens.dart';
 import 'screens/join_screens.dart';
+import 'screens/lumpsum_screen.dart';
+import 'screens/spend_screen.dart';
 import 'theme.dart';
 
 /// 화면(내부 Navigator) + 시트 / 모달 / 토스트 오버레이
@@ -202,5 +204,7 @@ Widget buildScreen(RouteEntry entry, VoidCallback? onOpenDemo) {
     ScreenId.assetConsent => AssetConsentScreen(entry: entry),
     ScreenId.asset => AssetScreen(entry: entry),
     ScreenId.explore => ExploreScreen(entry: entry),
+    ScreenId.lumpsum => LumpsumScreen(entry: entry),
+    ScreenId.spend => SpendScreen(entry: entry),
   };
 }

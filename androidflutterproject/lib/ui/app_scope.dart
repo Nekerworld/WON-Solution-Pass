@@ -32,7 +32,7 @@ AppServices createServices(KeyValueStorage storage, {double latencyScale = 1, bo
   final store = BankStore(events: events, storage: storage);
   final bank = MockBank(store: store, events: events, latencyScale: latencyScale);
   final pathfinder = Pathfinder(events: events);
-  final ai = AiAgent(events: events, latencyScale: () => bank.latencyScale);
+  final ai = AiAgent(events: events, bankState: () => store.state);
   final controller = AppController(
     store: store,
     bank: bank,

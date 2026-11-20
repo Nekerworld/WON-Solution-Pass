@@ -26,16 +26,6 @@ abstract class SheetState extends ChangeNotifier {
   VoidCallback? onClose;
 }
 
-/// 상품 상세의 가입 방법 선택 (AI와 함께 / 직접 가입)
-class JoinMethodSheet extends SheetState {
-  JoinMethodSheet({required this.productId, required this.from, required this.joinActive, required this.directActive});
-
-  final String productId;
-  final String? from;
-  final bool joinActive;
-  final bool directActive;
-}
-
 /// 자산관리 상담의 정보 고치기
 class AssetEditSheet extends SheetState {
   AssetEditSheet({required this.itemKey});

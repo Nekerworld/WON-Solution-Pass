@@ -22,13 +22,15 @@ import '../domain/pathfinder.dart';
 import '../domain/scenario.dart';
 import 'ai_agent.dart';
 import 'asset_flow.dart';
+import 'demo_profile.dart';
 import 'direct_flow.dart';
 import 'join_flow.dart';
+import 'lumpsum_flow.dart';
 import 'overlays.dart';
 import 'router.dart';
 import 'sessions.dart';
 
-const String sessionKey = 'wsp.session.v3';
+const String sessionKey = 'wsp.session.v6';
 
 /// 화면 데이터 (이동 전에 가상 은행에서 조회)
 class HomeData {
@@ -61,6 +63,8 @@ class AppController extends ChangeNotifier {
     join = JoinFlow(this);
     direct = DirectFlow(this);
     asset = AssetFlow(this);
+    lumpsum = LumpsumFlow(this);
+    demoProfile = DemoProfileStore(store: store, storage: storage);
     _load();
     for (final f in fsms.values) {
       f.addListener(_onFsmChanged);
@@ -83,10 +87,16 @@ class AppController extends ChangeNotifier {
   late final JoinFlow join;
   late final DirectFlow direct;
   late final AssetFlow asset;
+  late final LumpsumFlow lumpsum;
+  late final DemoProfileStore demoProfile;
+
+  /// 이전 룰베이스 자산관리 상담을 쓴다 (웹의 ?legacy=1). 기본은 목돈 상담이다
+  bool legacyConsult = false;
 
   Fsm get joinFsm => fsms[FsmKind.join]!;
   Fsm get directFsm => fsms[FsmKind.direct]!;
   Fsm get assetFsm => fsms[FsmKind.asset]!;
+  Fsm get lumpsumFsm => fsms[FsmKind.lumpsum]!;
 
   AppSession session = AppSession();
   int _epoch = 0;
@@ -147,7 +157,7 @@ class AppController extends ChangeNotifier {
         final history = asList(saved['history']).map(TransitionRecord.fromJson).whereType<TransitionRecord>().toList();
         e.value.restore(st, history);
       }
-      events.add('APP', '세션 복원 (가입 ${joinFsm.state} / 직접 ${directFsm.state} / 자산 ${assetFsm.state})');
+      events.add('APP', '세션 복원 (가입 ${joinFsm.state} / 직접 ${directFsm.state} / 자산 ${assetFsm.state} / 목돈 ${lumpsumFsm.state})');
     } catch (e) {
       debugPrint('[WSP] 세션 복원 실패 $e');
       session = AppSession();
@@ -165,8 +175,30 @@ class AppController extends ChangeNotifier {
     _dataTimer?.cancel();
     _dataTimer = Timer(const Duration(milliseconds: 120), () {
       final id = router.current?.id;
-      if (id == ScreenId.home || id == ScreenId.menu || id == ScreenId.apply || id == ScreenId.direct) router.rerender();
+      if (id == ScreenId.home || id == ScreenId.menu || id == ScreenId.apply || id == ScreenId.direct || id == ScreenId.spend) router.rerender();
     });
+  }
+
+  /// 저장 없이 다시 그리기만 한다 (글자 흐름·타이핑처럼 자주 바뀌는 값)
+  void touch() => notifyListeners();
+
+  /// 상담과 가입이 함께 읽는 고객 상황을 고친다
+  void publishContext({
+    String? goal,
+    String? selectedProductId,
+    FinancialSummary? financialSummary,
+    List<KnownLine>? knownFromAccount,
+    String? decisionId,
+  }) {
+    final c = session.customerContext ?? CustomerContext();
+    if (goal != null) c.goal = goal;
+    if (selectedProductId != null) c.selectedProductId = selectedProductId;
+    if (financialSummary != null) c.financialSummary = financialSummary;
+    if (knownFromAccount != null) c.knownFromAccount = knownFromAccount;
+    if (decisionId != null) c.decisionId = decisionId;
+    c.updatedAt = nowMs();
+    session.customerContext = c;
+    save();
   }
 
   /// 저장하고 화면을 다시 그린다. [screens]가 있으면 그 화면이 열려 있을 때만 다시 조회한다.
@@ -216,6 +248,7 @@ class AppController extends ChangeNotifier {
       ..lastDirectMetrics = lastDirect;
     ai.clearTrace();
     events.clear();
+    demoProfile.reapply();
     events.add('APP', '데모 초기화');
     save();
     notifyListeners();
@@ -255,6 +288,8 @@ class AppController extends ChangeNotifier {
         direct.resume();
       case ScreenId.asset:
         asset.resume();
+      case ScreenId.lumpsum:
+        lumpsum.resume();
       case ScreenId.support:
         ensureHandoff(params['track'] == 'asset' ? 'asset' : 'join');
       default:
@@ -425,13 +460,27 @@ class AppController extends ChangeNotifier {
 
   Future<void> goHome() => navigate(ScreenId.home, resetHistory: true);
 
-  void toggleBalance() {
-    session.ui.hideBalance = !session.ui.hideBalance;
-    refresh([ScreenId.home]);
+  /// 홈의 AI 버튼·자산 상담 시작
+  Future<void> startConsult() async {
+    if (!legacyConsult) {
+      lumpsum.open();
+      return;
+    }
+    await asset.startAction();
   }
 
-  void closeDisclaimer() {
-    session.ui.disclaimerClosed = true;
+  /// 홈 프롬프트 쿠키의 물어보기. 항상 새 채팅을 연다
+  Future<void> askCookie(String line) async {
+    if (!legacyConsult) {
+      lumpsum.startFresh(line);
+      return;
+    }
+    await asset.askCookie(line);
+  }
+
+  /// 해외주식 계좌 개설 완료 안내 닫기
+  void dismissOpenedNotice() {
+    session.openedNotice = null;
     refresh([ScreenId.home]);
   }
 
@@ -442,22 +491,6 @@ class AppController extends ChangeNotifier {
   Future<void> openProduct(String productId, {String? from}) => navigate(ScreenId.product, params: {'productId': productId, 'from': from});
 
   Future<void> goMenu({String? highlight, String? from}) => navigate(ScreenId.menu, params: {'highlight': highlight, 'from': from});
-
-  /// 상품 상세의 '상품 가입' → 가입 방법 선택
-  void openJoinMethod(String productId, {String? from}) {
-    final joinActive = joinFsm.state != 'IDLE' && session.join?.productId == productId;
-    final directActive = directFsm.state != 'IDLE' && session.direct?.productId == productId;
-    openSheet(JoinMethodSheet(productId: productId, from: from, joinActive: joinActive, directActive: directActive));
-  }
-
-  Future<void> chooseJoinMethod(bool ai, String productId, String? from) async {
-    closeSheet();
-    if (ai) {
-      await join.startAction(productId, from: from);
-    } else {
-      await direct.startAction(productId);
-    }
-  }
 
   /// 전체 메뉴에서 업무 화면을 연다 (기존 업무 화면)
   void menuTask(String taskId) {
@@ -563,6 +596,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> start() async {
     events.add('APP', '앱 시작');
+    demoProfile.reapply();
     await navigate(ScreenId.home, resetHistory: true, animate: false);
   }
 

@@ -282,6 +282,8 @@ class SystemState {
   factory SystemState.fromJson(Json j) => SystemState(bankAvailable: j['bankAvailable'] != false, stateVersion: asInt(j['stateVersion']) ?? 1);
 }
 
+const Set<String> _initiallyKnownFacts = {'adult', 'identityVerified', 'hasDepositAccount', 'certRegistered', 'kycDone'};
+
 class BankState {
   BankState({
     required this.customer,
@@ -308,8 +310,8 @@ class BankState {
   SystemState system;
 
   factory BankState.initial() => BankState(
-        customer: Customer(name: '김우리', age: 29, firstTimeCustomer: true, mobileOwnerVerified: true),
-        facts: {for (final f in sc.facts.keys) f: f == 'adult'},
+        customer: Customer(name: '김우리', age: 29, firstTimeCustomer: false, mobileOwnerVerified: true),
+        facts: {for (final f in sc.facts.keys) f: _initiallyKnownFacts.contains(f)},
         pending: {},
         taskSessions: {},
         applications: {},
@@ -320,12 +322,12 @@ class BankState {
           notLinked: ['증권사', '보험사', '부동산·현금'],
           otherBankAccounts: const [OtherAccount(bank: '가상 A은행', name: '입출금 통장', masked: '110-***-4421')],
           items: {
-            'monthlyIncome': FinItem(value: 3500000, source: 'ESTIMATED', basis: '가상 A은행 급여성 입금 최근 6개월 평균'),
-            'monthlyExpense': FinItem(value: 2100000, source: 'ESTIMATED', basis: '가상 A은행·B카드 출금 최근 6개월 평균'),
-            'liquidAssets': FinItem(value: 8000000, source: 'BANK', basis: '가상 A은행 예금·적금 잔액'),
+            'monthlyIncome': FinItem(value: 3500000, source: 'BANK', basis: '보유 입출금 계좌의 급여 내역'),
+            'monthlyExpense': FinItem(value: 2100000, source: 'BANK', basis: '보유 입출금 계좌의 지출 내역'),
+            'liquidAssets': FinItem(value: 8482400, source: 'BANK', basis: '보유 입출금 계좌의 예금 잔액'),
             'investAssets': FinItem(value: null, source: 'UNKNOWN', basis: '연결되지 않은 증권사'),
-            'debt': FinItem(value: 0, source: 'BANK', basis: '연결 기관 대출 없음 (연결 안 된 기관은 미확인)'),
-            'debtPayment': FinItem(value: 0, source: 'BANK', basis: '연결 기관 상환 내역 없음'),
+            'debt': FinItem(value: 0, source: 'BANK', basis: '보유 계좌 기준 대출 없음'),
+            'debtPayment': FinItem(value: 0, source: 'BANK', basis: '보유 계좌 기준 상환 내역 없음'),
           },
         ),
         simulation: Simulation(),

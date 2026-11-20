@@ -1,18 +1,18 @@
 /// 시연용 모의 AI. 실제 AI API를 호출하지 않는다.
 /// - 고객 문장 이해: 키워드 규칙
 /// - 출력: ai_schema 구조화 출력 → 검증 → 실패 시 기본 선택지로 대체
-/// - 로딩 연출: 400~1200ms 지연 (지연 배율 적용)
+/// - 말 사이 대기는 상담·가입 흐름에서 맞춘다. 여기서는 추가로 기다리지 않는다.
 /// - 추적: 입력·출력·검증 결과를 시연 화면에 보여 준다.
 /// AI는 질문·이해·설명·요약만 한다. 계산·판정·전이는 규칙 코드가 한다.
 library;
 
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
 import '../domain/ai_schema.dart';
 import '../domain/asset_advisor.dart' as aa;
+import '../domain/bank_state.dart';
 import '../domain/event_log.dart';
 import '../domain/formatters.dart';
 import '../domain/pathfinder.dart';
@@ -53,7 +53,7 @@ class AiResult {
 
 const AiOutput aiFallback = AiOutput(
   intent: 'FALLBACK',
-  message: '제가 확실하게 판단하지 못했어요. 아래 선택지에서 직접 골라 주세요.',
+  message: '아래 선택지에서 골라 주세요.',
   actions: [AiAction('EXPLAIN', {'text': '기본 선택지 표시'})],
 );
 
@@ -123,6 +123,21 @@ int? parseAmount(String text) {
   return null;
 }
 
+/// 생활비 N개월치는 지금 예금이 버티는 기간이지, 모으려는 기간이 아니다.
+int? goalMonthsFrom(String text) => parseMonths(text.replaceAll(RegExp(r'\d+\s*개월\s*치'), ''));
+
+/// 월급·지출·예금 잔액은 목표가 아니다. 문장에 남은 금액만 목표로 읽는다.
+int? goalAmountFrom(String text) =>
+    parseAmount(text.replaceAll(RegExp(r'(?:월급|소득|급여|지출|생활비|예금)\s*[\d,]+(?:\.\d+)?\s*(?:억|천\s*만|백만|만)?\s*원?'), ' '));
+
+/// 투자 속도 답. 공격적은 남는 돈의 90%다.
+int? paceShare(String text) {
+  if (RegExp(r'공격|적극|많이|대부분').hasMatch(text)) return 90;
+  if (RegExp(r'보통|절반|중간').hasMatch(text)) return 50;
+  if (RegExp(r'조금|천천히|안정|보수|작게').hasMatch(text)) return 30;
+  return null;
+}
+
 int? parseMonths(String text) {
   var m = RegExp(r'(\d+(?:\.\d+)?)\s*년').firstMatch(text);
   if (m != null) return (double.parse(m[1]!) * 12).round();
@@ -150,13 +165,12 @@ class HandoffCtx {
 }
 
 class AiAgent extends ChangeNotifier {
-  AiAgent({required this.events, required this.latencyScale, Random? random}) : _random = random ?? Random();
+  AiAgent({required this.events, BankState Function()? bankState}) : _bankState = bankState ?? BankState.initial;
 
   final EventLog events;
 
-  /// 가상 은행과 같은 지연 배율을 쓴다
-  final double Function() latencyScale;
-  final Random _random;
+  /// 고객 이름·은행 사실·계좌 금액을 문장에 넣을 때만 읽는다 (판정은 하지 않는다)
+  final BankState Function() _bankState;
   final List<AiTraceEntry> _trace = [];
   bool _injectInvalid = false;
 
@@ -173,15 +187,9 @@ class AiAgent extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _delay() {
-    final ms = ((400 + _random.nextDouble() * 800) * latencyScale()).round();
-    return ms > 0 ? Future.delayed(Duration(milliseconds: ms)) : Future.value();
-  }
-
   /// AI 호출 1회. producer는 구조화 출력을 만드는 순수 함수.
   Future<AiResult> run(String task, Map<String, Object?> input, AiContext ctx, AiOutput Function() producer) async {
     final t0 = DateTime.now();
-    await _delay();
     var output = producer();
     if (_injectInvalid) {
       _injectInvalid = false;
@@ -219,20 +227,31 @@ class AiAgent extends ChangeNotifier {
       {'conditions': ev.conditions.map((c) => '${c.id}:${c.status}').toList(), 'route': route.status},
       const AiContext(),
       () {
+        final cust = _bankState();
+        final name = cust.customer.name;
         final unmet = ev.conditions.where((c) => c.status != 'MET').toList();
         final met = ev.conditions.where((c) => c.status == 'MET').toList();
+        final needsIdentity = unmet.any((c) => c.fact == 'identityVerified');
+        final overseasLeft = unmet.any((c) => c.fact == 'fxRegistered' || c.fact == 'hasFxAccount' || c.fact == 'investorProfiled');
         final String message;
         if (unmet.isEmpty) {
-          message = '가입 조건을 모두 갖추셨어요. 가입 정보를 확인하고 승인만 하시면 돼요.';
+          message = '$name 고객님은 가입 조건을 모두 갖추셨어요. 가입 정보를 확인하고 승인만 하시면 돼요.';
+        } else if (_accountReady(cust) && overseasLeft) {
+          message = '해외주식에 필요한 외환거래부터 할게요.';
+        } else if (cust.facts['hasDepositAccount'] != true && needsIdentity) {
+          message = '$name 고객님은 우리 계좌가 없어서 실명확인부터예요.';
         } else {
-          message = '은행 기록을 확인해 보니 '
+          message = '$name 고객님, '
               '${met.isNotEmpty ? '${josa(met.map((c) => c.label).join(', '), '은')} 이미 충족했고, ' : ''}'
-              '가입 전에 ${unmet.length}가지(${unmet.map((c) => c.label).join(', ')})가 더 필요해요. 처음 거래하시는 분께 흔한 상황이에요.';
+              '가입 전에 ${unmet.length}가지(${unmet.map((c) => c.label).join(', ')})가 더 필요해요.';
         }
         return AiOutput(intent: 'EXPLAIN_CONDITIONS', message: message, actions: [AiAction('EXPLAIN', {'text': message})]);
       },
     );
   }
+
+  static bool _accountReady(BankState s) =>
+      s.facts['hasDepositAccount'] == true && s.facts['identityVerified'] == true && s.facts['certRegistered'] == true && s.facts['kycDone'] == true;
 
   Future<AiResult> joinAsk(String key, [List<String> skipped = const []]) {
     return run(
@@ -280,12 +299,15 @@ class AiAgent extends ChangeNotifier {
       {'steps': route.steps.map((s) => s.actionId).toList(), 'options': allowed},
       AiContext(allowedActionIds: allowed),
       () {
-        final first = getTask(route.steps.first.actionId)!;
-        final fact = first.effects.keys.first;
         final order = [for (var i = 0; i < route.steps.length; i++) '${i + 1}. ${route.steps[i].label}'].join('\n');
         final usable = route.options.where((o) => o.availability != 'BLOCKED' && o.reachable).toList();
-        var message = '지금 할 수 있는 순서는 아래와 같아요. 먼저 ${factLabel(fact)}부터 진행해요.';
-        if (usable.length > 1) message += ' 방법이 ${usable.length}가지 있으니 편한 쪽을 고르세요.';
+        final first = route.steps.isNotEmpty ? route.steps.first : null;
+        var message = first != null ? '다음은 ${josa(first.label, '을')} 도와드릴게요.' : '';
+        if (_accountReady(_bankState()) && first?.actionId == 'FX_REGISTER') {
+          message = '해외주식에 필요한 외환거래부터 할게요.';
+        } else if (usable.length > 1) {
+          message += '\n편한 방법을 골라 주세요.';
+        }
         return AiOutput(
           intent: 'PRESENT_OPTIONS',
           message: message,
@@ -313,7 +335,7 @@ class AiAgent extends ChangeNotifier {
     return run('업무 후 재확인 설명', {'result': kind, 'detail': detail}, const AiContext(), () {
       final msg = switch (kind) {
         'ALL_MET' => '은행 기록으로 다시 확인했어요. 가입 조건을 모두 갖추셨어요. 이제 가입 정보를 확인하고 승인해 주세요.',
-        'REMAINING' => '은행 기록으로 다시 확인했어요. ${detail ?? ''} 남은 조건을 이어서 해결해요.',
+        'REMAINING' => detail ?? '은행 기록으로 다시 확인했어요. 남은 조건을 이어서 해결해요.',
         _ => '업무 결과가 은행 기록과 맞지 않거나 아직 확인되지 않았어요. 원인을 확인할게요.',
       };
       return AiOutput(intent: 'RECHECK_$kind', message: msg, actions: [AiAction('EXPLAIN', {'text': msg})]);
@@ -330,7 +352,7 @@ class AiAgent extends ChangeNotifier {
       if (ctx.reasonText != null && ctx.reasonText!.isNotEmpty) lines.add('연결 사유: ${ctx.reasonText}');
       return AiOutput(
         intent: 'HANDOFF_SUMMARY',
-        message: '상담사가 처음부터 다시 묻지 않도록 지금까지의 상황을 정리했어요.',
+        message: '',
         summary: lines,
         actions: [AiAction('ESCALATE', {'reason': ctx.reason ?? 'HANDOFF'})],
       );
@@ -345,32 +367,35 @@ class AiAgent extends ChangeNotifier {
     return run('상담 목적 이해', {'text': text}, const AiContext(infoKeys: ['goalMonths', 'goalAmount']), () {
       final purpose = RegExp(r'주식|투자|해외|미국|증권').hasMatch(text)
           ? 'INVEST'
-          : (RegExp(r'비상|급할\s?때|예비').hasMatch(text) ? 'EMERGENCY' : 'GOAL_SAVING');
-      final months = parseMonths(text);
-      final amount = parseAmount(text);
+          : RegExp(r'비상|급할\s?때|예비').hasMatch(text)
+              ? 'EMERGENCY'
+              : (RegExp(r'정보만으로|어디부터').hasMatch(text) ? 'ORIENT' : 'GOAL_SAVING');
+      final savings = purpose == 'GOAL_SAVING' || purpose == 'INVEST';
+      final months = savings ? goalMonthsFrom(text) : null;
+      final amount = savings ? goalAmountFrom(text) : null;
       final actions = <AiAction>[
         if (months != null && months != 0) AiAction('SET_INFO', {'key': 'goalMonths', 'value': months, 'source': 'STATED'}),
         if (amount != null && amount != 0) AiAction('SET_INFO', {'key': 'goalAmount', 'value': amount, 'source': 'STATED'}),
       ];
-      final label = aa.purposes[purpose]!.label;
-      final message = "'$label' 상담으로 이해했어요."
-          '${months != null && months != 0 ? ' 기간은 ${josa(aa.display('goalMonths', months), '로')} 볼게요.' : ''}'
-          '${amount != null && amount != 0 ? ' 목표 금액은 ${formatMan(amount)}이에요.' : ''}';
-      return AiOutput(intent: 'SET_PURPOSE', purpose: purpose, message: message, actions: actions);
+      return AiOutput(intent: 'SET_PURPOSE', purpose: purpose, message: '', actions: actions);
     });
   }
 
   Future<AiResult> assetInterpret(aa.Metrics metrics) {
     return run('지표 해석', {'metrics': metrics.list.map((m) => '${m.key}=${m.value}').toList()}, const AiContext(), () {
-      final parts = <String>[];
-      if (metrics['surplus'].value != null) {
-        parts.add('매달 약 ${josa(metrics['surplus'].text, '이')} 남고, 그중 무리 없이 모을 수 있는 돈은 월 ${metrics['capacity'].text} 정도예요');
+      final st = _bankState();
+      final income = st.finance.items['monthlyIncome']?.value;
+      final expense = st.finance.items['monthlyExpense']?.value;
+      final String message;
+      if (income != null && expense != null) {
+        message = '${st.customer.name}님의 수입은 약 ${formatMan(income)}, 지출은 약 ${formatMan(expense)}이에요.';
+      } else if (metrics['surplus'].value != null) {
+        message = '매달 ${metrics['surplus'].text}이 남아요.';
+      } else if (metrics['needMonthly'].value != null) {
+        message = '목표를 채우려면 매달 ${josa(metrics['needMonthly'].text, '이')} 필요해요${metrics.feasible == false ? '. 지금 여유보다 많아서 조정이 필요해요' : ''}.';
+      } else {
+        message = '지금 정보로는 계산할 수 있는 게 많지 않아요.';
       }
-      if (metrics['emergencyMonths'].value != null) parts.add('바로 쓸 수 있는 예금은 생활비 ${metrics['emergencyMonths'].text}치예요');
-      if (metrics['needMonthly'].value != null) {
-        parts.add('목표를 채우려면 매달 ${josa(metrics['needMonthly'].text, '이')} 필요해요${metrics.feasible == false ? '. 지금 여유보다 많아서 조정이 필요해요' : ''}');
-      }
-      final message = parts.isNotEmpty ? '${parts.join('. ')}.' : '지금 정보로는 계산할 수 있는 게 많지 않아요.';
       return AiOutput(intent: 'INTERPRET', message: message, actions: [AiAction('EXPLAIN', {'text': message})]);
     });
   }
@@ -403,6 +428,17 @@ class AiAgent extends ChangeNotifier {
         return const AiOutput(intent: 'REFUSED', message: replyRefused, actions: [AiAction('HOLD', {'reason': 'REFUSED'})]);
       }
       if (q == null) return const AiOutput(intent: 'UNCLEAR', message: '말씀을 정확히 이해하지 못했어요.', actions: [AiAction('EXPLAIN', {'text': 'unclear'})]);
+      if (q.key == 'investPace') {
+        final pace = paceShare(text);
+        if (pace == null) {
+          return const AiOutput(intent: 'UNCLEAR', message: '조금만, 보통, 공격적 중에서 골라 주세요.', actions: [AiAction('EXPLAIN', {'text': 'unclear'})]);
+        }
+        return AiOutput(
+          intent: 'SET_INFO',
+          message: '${josa(aa.items['investPace']!.label, '을')} ${josa(aa.display('investPace', pace), '로')} 반영했어요.',
+          actions: [AiAction('SET_INFO', {'key': 'investPace', 'value': pace, 'source': 'STATED'})],
+        );
+      }
       var value = aa.items[q.key]!.kind == 'months' ? parseMonths(text) : parseAmount(text);
       if (value == null && (q.key == 'plannedLumpSum' || q.key == 'investAssets') && text.contains('없')) value = 0;
       if (value == null) {
@@ -443,6 +479,18 @@ class AiAgent extends ChangeNotifier {
     });
   }
 
+  /// 목돈 마련 제안 문장: 매달 얼마씩 모으면 기간 뒤 목표에 닿는지 한 줄로 말한다
+  String _goalSavingText(aa.ProposalBasis basis, aa.Metrics metrics) {
+    final monthly = formatMan(basis.monthly);
+    final months = basis.months;
+    if (months == null || months == 0) return '매달 $monthly씩 모으면 목표에 닿아요.';
+    final period = months % 12 == 0 ? '${months ~/ 12}년' : '$months개월';
+    final t = metrics['target'].value, e = metrics['expectedAmount'].value;
+    final short = t != null && e != null ? t - e : 0;
+    if (short > 0) return '매달 $monthly씩 $period 모아도 목표보다 ${formatMan((short / 10000).round() * 10000)} 적어요.';
+    return '매달 $monthly씩 $period 모으면 목표를 채울 수 있어요.';
+  }
+
   Future<AiResult> assetPropose(aa.ProposalBasis basis, String level, aa.Metrics metrics) {
     return run(
       '방향 제안 문장',
@@ -452,28 +500,27 @@ class AiAgent extends ChangeNotifier {
       },
       const AiContext(),
       () {
-        String text;
-        final monthly = basis.monthly;
-        if (monthly == null) {
+        final String text;
+        final held = metrics['emergencyMonths'].value;
+        const needMonths = Policy.emergencyMonths;
+        if (basis.purposeId == 'EMERGENCY') {
+          if (held == null) {
+            text = '생활비나 예금을 확인하지 못해 충분한지 계산하기 어려워요.';
+          } else if (held >= needMonths) {
+            text = '예금이 생활비 ${aa.numText(held)}개월치예요. 기준인 $needMonths개월치보다 많아서, 비상자금은 충분한 편이에요.';
+          } else {
+            text = '예금이 생활비 ${aa.numText(held)}개월치예요. 기준은 $needMonths개월치라 아직 부족해요.';
+          }
+        } else if (basis.purposeId == 'ORIENT') {
+          text = held == null ? '비상자금 기준은 $needMonths개월치예요.' : '비상자금 기준은 $needMonths개월치예요. 지금은 그보다 ${held >= needMonths ? '많아요.' : '적어요.'}';
+        } else if (basis.monthly == null) {
           text = '지금 정보로는 월 적립액을 계산하기 어려워요.';
         } else if (basis.purposeId == 'INVEST') {
-          final reserve = metrics['reserve'];
-          text = '${reserve.value != null ? '생활비 ${Policy.emergencyMonths}개월치인 ${josa(reserve.text, '은')} 예금으로 남겨 두고, ' : ''}'
-              '매달 ${formatMan(monthly)} 정도로 해외주식 투자를 시작해 보시는 걸 제안해요. 투자는 원금 손실이 날 수 있어서, 무리 없이 모을 수 있는 돈의 절반만 잡았어요.';
+          text = '투자는 원금 손실이 날 수 있어요.';
+        } else if (basis.purposeId == 'GOAL_SAVING') {
+          text = _goalSavingText(basis, metrics);
         } else {
-          text = '매달 ${formatMan(monthly)}씩${basis.months != null && basis.months != 0 ? ' ${aa.display('goalMonths', basis.months)} 동안' : ''} 모아 보시는 걸 제안해요.';
-          final exp = metrics['expectedAmount'].value;
-          if (exp != null) text += ' 기간이 끝나면 약 ${josa(formatMan(exp), '이')} 모여요.';
-          if (basis.feasible == false) text += ' 목표인 ${metrics['target'].text}에는 못 미쳐서, 바꿀 수 있는 방법도 함께 보여 드릴게요.';
-        }
-        String label(List<String> keys) => keys.map(aa.itemLabel).join('·');
-        final est = basis.estimated, unc = basis.unconfirmed;
-        if (est.isNotEmpty && unc.isNotEmpty) {
-          text += ' ${josa(label(est), '은')} 입출금 내역으로 추정한 값이고 ${josa(label(unc), '은')} 확인하지 못해서, 실제와 다를 수 있어요.';
-        } else if (est.isNotEmpty) {
-          text += ' ${josa(label(est), '은')} 입출금 내역으로 추정한 값이라 실제와 다를 수 있어요.';
-        } else if (unc.isNotEmpty) {
-          text += ' ${josa(label(unc), '은')} 확인하지 못해서 실제와 다를 수 있어요.';
+          text = '';
         }
         return AiOutput(intent: 'PROPOSE', message: text, actions: [AiAction('PROPOSE', {'text': text, 'level': level})]);
       },

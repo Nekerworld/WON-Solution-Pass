@@ -6,7 +6,6 @@ import '../domain/scenario.dart';
 import 'icons.dart';
 import 'responsive.dart';
 import 'screens/asset_screens.dart' show AssetEditSheetView;
-import 'screens/home_screens.dart' show JoinMethodSheetView;
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -93,7 +92,6 @@ class _SheetLayerState extends State<SheetLayer> with SingleTickerProviderStateM
                             decoration: BoxDecoration(color: AppColors.lineStrong, borderRadius: BorderRadius.circular(3)),
                           ),
                         ),
-                        if (sheet is JoinMethodSheet) JoinMethodSheetView(sheet: sheet),
                         if (sheet is AssetEditSheet) AssetEditSheetView(sheet: sheet),
                       ],
                     ),
@@ -399,7 +397,29 @@ class _TaskModalLayerState extends State<TaskModalLayer> with SingleTickerProvid
                                     ),
                                   );
                                 }),
-                              if (result != null) ...[
+                              if (s.status == 'COMPLETED')
+                                Semantics(
+                                  label: '완료',
+                                  child: Container(
+                                    constraints: const BoxConstraints(minHeight: 168),
+                                    padding: const EdgeInsets.fromLTRB(0, 28, 0, 8),
+                                    alignment: Alignment.bottomCenter,
+                                    child: TweenAnimationBuilder<double>(
+                                      tween: Tween(begin: 0.6, end: 1),
+                                      duration: const Duration(milliseconds: 350),
+                                      curve: appEase,
+                                      builder: (context, k, child) => Transform.scale(scale: k, child: Opacity(opacity: ((k - 0.6) / 0.4).clamp(0, 1), child: child)),
+                                      child: Container(
+                                        width: 88,
+                                        height: 88,
+                                        alignment: Alignment.center,
+                                        decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle),
+                                        child: SvgIcon(AppIcons.check, size: 46, color: Colors.white),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              else if (result != null) ...[
                                 const SizedBox(height: 8),
                                 Builder(builder: (context) {
                                   final c = ToneColors.of(result.$1);

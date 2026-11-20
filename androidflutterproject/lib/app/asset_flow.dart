@@ -5,7 +5,10 @@
 /// - 방향을 고르는 것은 가입이 아니다. 상품 가입은 고객이 상품을 고른 뒤 가입 지원 트랙에서 따로 진행한다.
 library;
 
+import 'dart:math';
+
 import '../domain/asset_advisor.dart' as aa;
+import '../domain/bank_state.dart';
 import '../domain/bank_types.dart';
 import '../domain/formatters.dart';
 import '../domain/fsm.dart';
@@ -30,8 +33,44 @@ const List<String> _auto = [
   'PROPOSED_LIMITED',
 ];
 
-/// 메시지가 한꺼번에 쌓이면 고객이 스크롤을 올려 다시 읽어야 하므로, 이어지는 안내 사이에 최소 간격을 둔다
-const int gapMs = 3000;
+final RegExp cookieBanned = RegExp(r'종목|매수|매도|수익률|추천주|사세요');
+
+/// 홈 프롬프트 쿠키 문장. 계좌 정보가 있으면 그 숫자로 만든 문장을 더한다
+List<String> cookieLines(BankState s) {
+  final lines = [
+    '해외주식 투자를 처음 시작해 보고 싶어요.',
+    '비상자금이 충분한지 알고 싶어요.',
+    '3년 안에 목돈을 모으려면 매달 얼마를 모아야 할까요?',
+    '계좌에 있는 정보만으로, 자산관리를 어디부터 보면 좋을까요?',
+  ];
+  final items = s.finance.items;
+  final income = items['monthlyIncome']?.value, expense = items['monthlyExpense']?.value, liquid = items['liquidAssets']?.value;
+  if (income != null && expense != null && expense != 0 && liquid != null) {
+    final months = (liquid / expense * 10).round() / 10;
+    lines.add('예금이 생활비 ${aa.numText(months)}개월치예요. 비상자금으로 충분한지 알고 싶어요.');
+    lines.add('해외주식을 시작해도 부담 없을까요?');
+    lines.add('지금 예금 ${formatMan((liquid / 10000).round() * 10000)}이면, 결혼 자금 3천만원을 모으는 데 얼마나 부족한가요?');
+    if (s.facts['hasFxAccount'] != true) lines.add('해외주식 계좌는 아직 없어요. 매달 얼마부터 보면 좋을지 알고 싶어요.');
+  }
+  return lines.where((t) => !cookieBanned.hasMatch(t) && t.length <= 120).toList();
+}
+
+final Random _cookieRand = Random();
+
+String pickCookie(BankState s) {
+  final lines = cookieLines(s);
+  if (lines.isEmpty) return '';
+  return lines[_cookieRand.nextInt(lines.length)];
+}
+
+/// 지금 보이는 문장과 다른 문장을 고른다
+String nextCookie(BankState s, String current) {
+  final lines = cookieLines(s);
+  if (lines.isEmpty) return '';
+  final rest = lines.where((t) => t != current).toList();
+  final pool = rest.isNotEmpty ? rest : lines;
+  return pool[_cookieRand.nextInt(pool.length)];
+}
 
 class AssetFlow {
   AssetFlow(this.app);
@@ -41,10 +80,20 @@ class AssetFlow {
   Fsm get fsm => app.assetFsm;
   AssetSession? get s => app.session.asset;
 
-  int _lastSaidAt = 0;
   int _pacing = 0;
   bool _running = false;
   bool _again = false;
+
+  /// 인사 말이 나가기 전에 목표 칩이 눌리면 말이 순서가 뒤집힌다. 고객 동작은 한 줄로 잇는다.
+  Future<void> _tail = Future.value();
+
+  Future<void> _enqueue(Future<void> Function() fn) {
+    final run = _tail.then((_) => fn());
+    _tail = run.catchError((_) {});
+    return run;
+  }
+
+  int _scaleMs(num ms) => (ms * app.bank.latencyScale).round();
 
   void _push(ChatMsg Function(int id, int at) make) {
     final a = s;
@@ -53,21 +102,41 @@ class AssetFlow {
     if (a.chat.length > 80) a.chat.removeAt(0);
   }
 
-  /// 기다리는 동안 데모가 초기화됐으면 false
+  /// 사용자 말이 들어오는 동안에는 로딩을 켜지 않는다.
+  Future<bool> _waitUserSlide(int ep) async {
+    final last = s?.chat.lastOrNull;
+    if (last == null || last.role != 'user') return true;
+    final left = _scaleMs(1000) - (nowMs() - last.at);
+    if (left > 0) {
+      _think(false);
+      await app.sleep(left);
+      if (_stale(ep)) return false;
+    }
+    return true;
+  }
+
+  /// 화면에 나오는 말 사이에 생각 1.5초, 읽을 시간 1초를 둔다. 기다리는 동안 데모가 초기화됐으면 false
   Future<bool> _say(ChatMsg Function(int id, int at) make) async {
     final ep = app.epoch;
-    final wait = _lastSaidAt + gapMs * app.bank.latencyScale - nowMs();
-    if (wait > 0) {
+    if (!await _waitUserSlide(ep)) return false;
+    final thinkMs = _scaleMs(1500), easeMs = _scaleMs(1000);
+    if (thinkMs > 0) {
       _pacing += 1;
       _think(true);
-      await app.sleep(wait);
+      await app.sleep(thinkMs);
       _pacing -= 1;
       if (_stale(ep)) return false;
     }
+    if (s == null) return false;
     s!.thinking = false;
     _push(make);
-    _lastSaidAt = nowMs();
     app.refresh(_screens);
+    if (easeMs > 0) {
+      _pacing += 1;
+      await app.sleep(easeMs);
+      _pacing -= 1;
+      if (_stale(ep)) return false;
+    }
     return true;
   }
 
@@ -87,6 +156,28 @@ class AssetFlow {
 
   bool _stale(int ep) => ep != app.epoch || s == null;
 
+  /// 상담에서 확인한 목표·참고 금액·계좌 정보를 가입 화면과 같은 객체에 둔다.
+  void _syncContext({String? selectedProductId}) {
+    final a = s;
+    if (a == null) return;
+    final known = <KnownLine>[];
+    final items = a.info?.items;
+    if (items != null) {
+      for (final k in ['monthlyIncome', 'monthlyExpense', 'liquidAssets']) {
+        final it = items[k];
+        if (it == null || it.value == null || (it.source != 'BANK' && it.source != 'STATED')) continue;
+        known.add(KnownLine(label: aa.itemLabel(k), text: aa.display(k, it.value), source: it.source == 'BANK' ? '계좌' : '고객 답변'));
+      }
+    }
+    final monthly = a.proposal?.basis.monthly ?? a.handoffTerms?.monthly;
+    app.publishContext(
+      goal: a.goalText,
+      knownFromAccount: known,
+      financialSummary: monthly == null ? null : FinancialSummary(monthly: monthly, source: '계좌 정보 기준', adjustable: true),
+      selectedProductId: selectedProductId,
+    );
+  }
+
   /* ---------------- 시작 ---------------- */
   bool start() {
     if (fsm.state == 'CLOSED' || fsm.state == 'TO_JOIN') fsm.transition('NEW_CASE');
@@ -96,29 +187,55 @@ class AssetFlow {
     return true;
   }
 
-  void agree() {
-    if (fsm.state != 'CONSENT') return;
+  Future<void> agree() {
+    if (fsm.state != 'CONSENT') return Future.value();
     fsm.transition('AGREE');
-    _push((id, at) => ChatMsg(id: id, at: at, role: 'ai', text: '어떤 목표로 상담받고 싶으세요? 편하게 말씀해 주세요. 예: "2년 뒤 결혼 자금 모으고 싶어요"'));
-    _lastSaidAt = nowMs();
-    app.navigate(ScreenId.asset, replace: true);
+    s?.thinking = true;
+    return _enqueue(() async {
+      await app.navigate(ScreenId.asset, replace: true);
+      await _sayBot('어떤 목표로 상담받고 싶으세요? 편하게 말씀해 주세요. 예: "2년 뒤 결혼 자금 모으고 싶어요"');
+    });
   }
 
-  Future<void> setGoal(String text) async {
-    final a = s;
+  bool get freshConsult => const ['IDLE', 'CLOSED', 'TO_JOIN'].contains(fsm.state);
+
+  /// 쿠키 문장으로 상담을 연다. 목표를 다시 묻는 인사는 하지 않는다.
+  Future<void> askCookie(String text) async {
     final t = text.trim();
-    if (a == null || t.isEmpty || fsm.state != 'GOAL') return;
+    if (t.isEmpty || cookieBanned.hasMatch(t)) return;
+    if (!freshConsult) return open();
+    if (!start() || !fsm.can('AGREE')) return;
+    fsm.transition('AGREE');
+    s?.thinking = true;
+    return _enqueue(() async {
+      _sayUser(t);
+      await app.navigate(ScreenId.asset, replace: true);
+      await _applyGoal(t);
+    });
+  }
+
+  Future<void> setGoal(String text) => _enqueue(() => _setGoalNow(text));
+
+  Future<void> _setGoalNow(String text) async {
+    final t = text.trim();
+    if (s == null || t.isEmpty || fsm.state != 'GOAL') return;
     _sayUser(t);
+    await _applyGoal(t);
+  }
+
+  Future<void> _applyGoal(String t) async {
+    final a = s;
+    if (a == null || fsm.state != 'GOAL') return;
     final ep = app.epoch;
-    _think(true);
     final ai = await app.ai.assetGoal(t);
     if (_stale(ep)) return;
     a.goalText = t;
+    _syncContext();
     a.purpose = ai.valid && ai.output.purpose != null ? ai.output.purpose! : 'GOAL_SAVING';
     for (final x in ai.output.actions) {
       if (x.type == 'SET_INFO') a.stated[x['key'] as String] = (x['value'] as num).round();
     }
-    if (!await _sayAI(ai)) return;
+    if (ai.output.message.isNotEmpty && !await _sayAI(ai)) return;
     fsm.transition('GOAL_SET', {'purpose': a.purpose});
     await advance();
   }
@@ -155,6 +272,7 @@ class AssetFlow {
     final a = s!;
     final f = fsm;
     if (st == 'COLLECTING') {
+      if (!await _waitUserSlide(ep)) return;
       _think(true);
       final r = await app.bank.getFinancialSnapshot();
       if (_stale(ep)) return;
@@ -167,6 +285,7 @@ class AssetFlow {
         return;
       }
       _collect(r.data!);
+      _syncContext();
       f.transition('COLLECTED', {'stateVersion': r.data!.stateVersion});
     } else if (st == 'TAGGING') {
       app.events.add('ASSET', '출처 구분: ${a.info!.items.entries.map((e) => '${e.key}:${e.value.source}').join(', ')}');
@@ -176,7 +295,10 @@ class AssetFlow {
       app.events.add('ASSET', '지표 계산: ${a.metrics!.list.map((m) => '${m.key}=${m.value ?? '-'}').join(', ')}');
       f.transition(st == 'CALCULATING' ? 'CALCULATED' : 'RECALCULATED');
     } else if (st == 'INTERPRETING') {
-      _think(true);
+      if (a.chat.any((m) => m.kind == 'interpret')) {
+        f.transition('INTERPRETED');
+        return;
+      }
       final ai = await app.ai.assetInterpret(a.metrics!);
       if (_stale(ep)) return;
       if (!await _sayAI(ai, kind: 'interpret', figures: aa.interpretFigures(a.metrics!, a.purpose))) return;
@@ -189,8 +311,7 @@ class AssetFlow {
       }
       if (aa.canAsk(questionsAsked: a.questionsAsked, stopRequested: a.stopRequested, gaps: a.gaps)) {
         final gap = a.gaps.firstWhere((g) => aa.questionFor(g) != null);
-        final q = aa.questionFor(gap)!;
-        _think(true);
+        final q = _posedQuestion(aa.questionFor(gap)!, a.goalText);
         final ai = await app.ai.assetAsk(q, gap);
         if (_stale(ep)) return;
         if (!await _sayAI(ai, kind: 'question', key: q.key, why: q.why, level: gap.level)) return;
@@ -217,13 +338,19 @@ class AssetFlow {
     } else if (st == 'PROPOSED_FULL' || st == 'PROPOSED_LIMITED') {
       final level = st == 'PROPOSED_FULL' ? 'FULL' : 'LIMITED';
       final basis = aa.proposalBasis(a.info!, a.purpose, a.metrics!);
-      _think(true);
       final ai = await app.ai.assetPropose(basis, level, a.metrics!);
       if (_stale(ep)) return;
       if (!await _sayAI(ai, kind: 'proposal', figures: aa.proposalFigures(basis, a.metrics!))) return;
       a.proposal = Proposal(level: level, basis: basis, text: ai.output.message);
+      _syncContext();
       f.transition('SHOWN', {'level': level});
     }
+  }
+
+  /// 목표로 이미 말한 경조사·결혼·이사를, 아직 모르는 지출처럼 다시 묻지 않는다.
+  aa.AssetQuestion _posedQuestion(aa.AssetQuestion q, String goalText) {
+    if (q.key != 'plannedLumpSum' || !RegExp(r'결혼|이사|경조사').hasMatch(goalText)) return q;
+    return aa.AssetQuestion(id: q.id, key: q.key, text: '그 외에 또 나갈 목돈이 있나요?', why: '', options: q.options);
   }
 
   void _collect(FinancialSnapshot data) {
@@ -286,9 +413,14 @@ class AssetFlow {
     }
     final hold = actions.where((x) => x.$1 == 'HOLD').firstOrNull;
     if (hold != null && q != null) {
-      aa.markDeclined(a.info!, q.key, hold.$2['reason'] as String? ?? 'UNKNOWN');
+      final reason = hold.$2['reason'] as String? ?? 'UNKNOWN';
+      aa.markDeclined(a.info!, q.key, reason);
       a.pendingQuestion = null;
-      f.transition('UNKNOWN_OR_REFUSED', {'key': q.key, 'kind': hold.$2['reason']});
+      if (reason == 'UNKNOWN') {
+        f.transition('SKIP_ONE', {'key': q.key});
+      } else {
+        f.transition('UNKNOWN_OR_REFUSED', {'key': q.key, 'kind': reason});
+      }
       return advance();
     }
     final sets = actions.where((x) => x.$1 == 'SET_INFO').toList();
@@ -305,7 +437,9 @@ class AssetFlow {
   }
 
   /// 답변 칩: 범위 답변
-  Future<void> answerChip(String value, String label) async {
+  Future<void> answerChip(String value, String label) => _enqueue(() => _answerChipNow(value, label));
+
+  Future<void> _answerChipNow(String value, String label) async {
     final a = s;
     if (a == null || fsm.state != 'ASKING') return;
     final q = aa.questions[a.pendingQuestion];
@@ -322,9 +456,12 @@ class AssetFlow {
   }
 
   /* ---------------- 검토 ---------------- */
-  Future<void> accept() async {
+  Future<void> accept() => _enqueue(_acceptNow);
+
+  Future<void> _acceptNow() async {
     final a = s;
     if (a == null || fsm.state != 'REVIEW') return;
+    a.pendingAccept = true;
     _sayUser('이 방향으로 할게요');
     a.handoffTerms = HandoffTerms(
       purpose: aa.purposeOf(a.purpose).label,
@@ -333,8 +470,15 @@ class AssetFlow {
       months: a.proposal!.basis.months,
       goalText: a.goalText,
     );
+    _syncContext();
+    final said = await _sayBot('좋아요. 다음에 할 일을 골라 주세요.');
+    a.pendingAccept = false;
+    if (!said || fsm.state != 'REVIEW') {
+      app.refresh(_screens);
+      return;
+    }
     fsm.transition('ACCEPT');
-    await _sayBot('좋아요. 다음에 할 일을 골라 주세요.');
+    app.refresh(_screens);
   }
 
   Future<void> modifyText(String text) async {
@@ -365,7 +509,7 @@ class AssetFlow {
     if (alt == null) return;
     _sayUser(alt.label);
     if (alt.apply.isEmpty) {
-      await _sayBot('비상자금을 먼저 채우는 방향은 상담사와 함께 구체적으로 정하는 걸 권해요. 이 방향으로 정한 뒤 상담 연결을 고를 수 있어요.');
+      await _sayBot(alt.message ?? '비상자금부터 채우는 건 상담 연결에서 이어서 정하면 돼요.');
       return;
     }
     for (final e in alt.apply.entries) {
@@ -430,6 +574,21 @@ class AssetFlow {
     if (a == null || a.info == null || !aa.items.containsKey(key)) return;
     aa.setItem(a.info!, key, value, 'STATED', '고객 정정');
     app.events.add('ASSET', '정보 정정 $key → $value');
+    final p = a.proposal;
+    if (p != null && (key == 'monthlyIncome' || key == 'monthlyExpense' || key == 'monthlySavingPref')) {
+      a.metrics = aa.computeMetrics(a.info!);
+      final basis = aa.proposalBasis(a.info!, a.purpose, a.metrics!);
+      a.proposal = Proposal(level: p.level, basis: basis, text: p.text, at: p.at);
+      final t = a.handoffTerms;
+      a.handoffTerms = HandoffTerms(
+        purpose: t?.purpose ?? aa.purposeOf(a.purpose).label,
+        tags: t?.tags ?? basis.tags,
+        monthly: basis.monthly,
+        months: t?.months ?? basis.months,
+        goalText: t?.goalText ?? a.goalText,
+      );
+    }
+    _syncContext();
     app.refresh(_screens);
   }
 
@@ -437,6 +596,7 @@ class AssetFlow {
     final st = fsm.state;
     if (st != 'EXPLORE' && st != 'TO_JOIN') return;
     if (st == 'EXPLORE') fsm.transition('PRODUCT_SELECTED', {'productId': productId});
+    _syncContext(selectedProductId: productId);
     app.navigate(ScreenId.product, params: {'productId': productId, 'from': 'asset'});
   }
 
@@ -462,7 +622,7 @@ class AssetFlow {
       return;
     }
     app.refresh(_screens);
-    if (a != null) _sayBot('상담을 마쳤어요. 상품 가입이나 이체 같은 변경은 하지 않았어요.');
+    if (a != null) _sayBot('상담을 마쳤어요.');
   }
 
   Future<void> _exit() async => end();
@@ -519,20 +679,19 @@ class AssetFlow {
         _ => ScreenId.asset,
       };
 
-  /// 홈·상품몰의 AI 자산관리 버튼
+  /// 이전 룰베이스 상담 시작 (시연 패널에서 이전 상담을 켰을 때)
   Future<void> startAction() async {
-    final st = fsm.state;
-    if (st == 'IDLE' || st == 'CLOSED' || st == 'TO_JOIN') {
+    if (freshConsult) {
       if (start()) await app.navigate(ScreenId.assetConsent);
       return;
     }
-    await app.navigate(_screenFor(st), params: st == 'HANDOFF' ? const {'track': 'asset'} : const {});
+    await open();
   }
 
-  void open() {
+  Future<void> open() async {
     final st = fsm.state;
     if (st == 'IDLE') return;
-    app.navigate(_screenFor(st), params: st == 'HANDOFF' ? const {'track': 'asset'} : const {});
+    await app.navigate(_screenFor(st), params: st == 'HANDOFF' ? const {'track': 'asset'} : const {});
   }
 
   void decline() {
@@ -548,6 +707,14 @@ class AssetFlow {
     app.openSheet(AssetEditSheet(itemKey: key));
   }
 
+  /// 투자 속도 시트의 칩
+  void savePace(String key, int value) {
+    final v = aa.pacePercent(value);
+    if (v == null) return;
+    app.closeSheet();
+    editItem(key, v);
+  }
+
   /// 정보 고치기 시트의 저장 버튼. 금액은 만원 단위로 입력받는다.
   void saveEdit(String key, String raw) {
     final digits = raw.replaceAll(RegExp(r'[^\d]'), '');
@@ -556,7 +723,8 @@ class AssetFlow {
       return;
     }
     final v = int.parse(digits);
+    final kind = aa.items[key]!.kind;
     app.closeSheet();
-    editItem(key, aa.items[key]!.kind == 'months' ? v : v * 10000);
+    editItem(key, kind == 'months' ? v : (kind == 'pace' ? aa.pacePercent(v)! : v * 10000));
   }
 }

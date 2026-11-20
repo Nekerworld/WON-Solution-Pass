@@ -72,9 +72,10 @@ class FinancialSnapshot {
 }
 
 class AccountRef {
-  const AccountRef(this.name, this.number);
+  const AccountRef(this.name, this.number, {this.balance = 0});
   final String name;
   final String number;
+  final int balance;
 }
 
 class SavingRef {

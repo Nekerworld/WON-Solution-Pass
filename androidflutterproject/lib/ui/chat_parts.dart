@@ -5,13 +5,14 @@ import 'package:flutter/material.dart';
 import '../app/sessions.dart';
 import '../domain/asset_advisor.dart' as aa;
 import '../domain/formatters.dart';
+import 'app_scope.dart';
 import 'icons.dart';
 import 'responsive.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// 우리WON뱅킹 AI챗봇 화면 머리: 제목, AI 배지, 보조 도구 줄.
-/// [exitLabel]이 있으면 세 번째 도구 자리에 둔다 (없으면 '처음으로', 동작 없음).
+/// 해결패스 대화 화면 머리: '{이름}님의 해결패스', AI 배지.
+/// [exitLabel]이 있으면 아래 도구 줄 오른쪽에 그 버튼 하나만 둔다.
 class ChatHeader extends StatelessWidget {
   const ChatHeader({super.key, required this.onBack, this.exitLabel, this.onExit});
 
@@ -21,24 +22,21 @@ class ChatHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final name = AppScope.controllerOf(context).store.state.customer.name;
     return Column(
       children: [
-        WspAppBar(title: 'AI챗봇과 대화중', onBack: onBack, right: const _AiBadge()),
-        Container(
-          height: 46,
-          color: Colors.white,
-          child: MaxWidth(
-            child: Row(
-              children: [
-                _ToolButton(icon: AppIcons.talk, label: '톡상담', onTap: () {}),
-                const _ToolDivider(),
-                _ToolButton(icon: AppIcons.eyeOff, label: '상담숨기기', onTap: () {}),
-                const _ToolDivider(),
-                _ToolButton(icon: AppIcons.refresh, label: exitLabel ?? '처음으로', onTap: exitLabel != null ? onExit : () {}),
-              ],
+        WspAppBar(title: '$name님의 해결패스', onBack: onBack, right: const _AiBadge()),
+        if (exitLabel != null)
+          Container(
+            decoration: const BoxDecoration(color: Colors.white, border: Border(bottom: BorderSide(color: Color(0xFFEEF0F3)))),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: MaxWidth(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [_ToolButton(icon: AppIcons.refresh, label: exitLabel!, onTap: onExit)],
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -79,27 +77,21 @@ class _ToolButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(6, 8, 6, 10),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            SvgIcon(icon, size: 18, color: AppColors.chatTool),
+            SvgIcon(icon, size: 15, color: const Color(0xFF474C50)),
             const SizedBox(width: 5),
-            Text(label, style: ts(14.5, color: AppColors.chatTool)),
+            Text(label, style: ts(12.5, color: const Color(0xFF474C50))),
           ],
         ),
       ),
     );
   }
-}
-
-class _ToolDivider extends StatelessWidget {
-  const _ToolDivider();
-
-  @override
-  Widget build(BuildContext context) => Container(width: 1, height: 18, color: const Color(0xFFE3E6EA));
 }
 
 class BotAvatar extends StatelessWidget {
@@ -159,7 +151,9 @@ class ChatIntro extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  '$customerName 고객님, 안녕하세요.\n우리은행 AI챗봇입니다.',
+                  AppScope.controllerOf(context).store.state.customer.firstTimeCustomer
+                      ? '$customerName 고객님, 우리은행은 처음이시네요.'
+                      : '$customerName 고객님, 안녕하세요.',
                   style: ts(19, weight: FontWeight.w700, height: 1.45, letterSpacing: -0.03),
                 ),
               ),
@@ -267,17 +261,6 @@ class ChatMessageView extends StatelessWidget {
                             ),
                         ],
                         if (m.figures != null && m.figures!.isNotEmpty) ...[const SizedBox(height: 10), FigureGrid(m.figures!)],
-                        if (m.why != null) ...[
-                          const SizedBox(height: 8),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(padding: const EdgeInsets.only(top: 2), child: SvgIcon(AppIcons.question, size: 13, color: AppColors.text3)),
-                              const SizedBox(width: 5),
-                              Expanded(child: Text(m.why!, style: ts(12, color: AppColors.text3, height: 1.5))),
-                            ],
-                          ),
-                        ],
                       ],
                     ),
                   ),
@@ -460,13 +443,13 @@ class QuickChips extends StatelessWidget {
   }
 }
 
-/// 대화 입력줄
+/// 대화 입력줄. [onSend]가 없으면 입력은 되지만 보내지 않는다 (답은 칩·버튼으로만 받는다).
 class ChatInputBar extends StatefulWidget {
-  const ChatInputBar({super.key, required this.placeholder, required this.enabled, required this.onSend, this.fieldKey});
+  const ChatInputBar({super.key, this.placeholder = '', this.enabled = true, this.onSend, this.fieldKey});
 
   final String placeholder;
   final bool enabled;
-  final void Function(String text) onSend;
+  final void Function(String text)? onSend;
   final Key? fieldKey;
 
   @override
@@ -483,10 +466,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   void _send() {
-    if (!widget.enabled) return;
+    final send = widget.onSend;
+    if (!widget.enabled || send == null) return;
     final v = _input.text;
     _input.clear();
-    widget.onSend(v);
+    send(v);
   }
 
   @override
